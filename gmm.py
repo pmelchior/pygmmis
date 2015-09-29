@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
+D = 2
+
 def draw(amp, mean, covar, size=1, box_limits=None):
     amp /= amp.sum()
     # draw indices for components given amplitudes
@@ -24,11 +26,10 @@ def draw(amp, mean, covar, size=1, box_limits=None):
             samples[counter] = np.random.multivariate_normal(mean[i], covar[i], size=1)
             counter += 1
 
-    # if subsample within box is needed:
-    # make sure that the sampling is from within the box
+    # if subsample outside box is needed:
     if box_limits is not None:
         while True:
-            sel_ = (samples[:,0] > box_limits[0,0]) & (samples[:,0] < box_limits[1,0]) & (samples[:,1] > box_limits[0,1]) & (samples[:,1] < box_limits[1,1]) & (samples[:,2] > box_limits[0,2]) & (samples[:,2] < box_limits[1,2])
+            sel_ = (samples[:,0] <= box_limits[0,0]) | (samples[:,0] > box_limits[1,0]) | (samples[:,1] <= box_limits[0,1]) | (samples[:,1] > box_limits[1,1])
             size_in = sel_.sum()
             if size_in == size:
                 break
@@ -60,6 +61,7 @@ def logsumLogL(ll):
     
     """
     # typo in eq. 58: log(N) -> log(K)
+    K = ll.shape[0]
     floatinfo = np.finfo('d')
     underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
     overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(K)
@@ -67,6 +69,7 @@ def logsumLogL(ll):
     return np.log(np.exp(ll + c).sum(axis=0)) - c
 
 def E(data, qij, amp, mean, covar):
+    K = amp.size
     for j in xrange(K):
         dx = data - mean[j]
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(covar[j]), dx.T))
@@ -74,33 +77,60 @@ def E(data, qij, amp, mean, covar):
     for j in xrange(K):
         qij[:,j] -= logsumLogL(qij.T)
 
-def M(data, qij, amp, mean, covar):
+def M(data, qij, amp, mean, covar, impute=0):
+    K = amp.size
+    N = data.shape[0] - impute
     qj = np.exp(logsumLogL(qij))
+    if impute:
+        qj_in = np.exp(logsumLogL(qij[:-impute]))
+        qj_out = np.exp(logsumLogL(qij[-impute:]))
+        covar_ = np.empty((D,D))
+        
     for j in xrange(K):
-        amp[j] = np.exp(qij[:,j]).sum()/N
+        Q_i = np.exp(qij[:,j])
+        amp[j] = Q_i.sum()/(N+impute)
+        # do covar first since we can do this without a copy of mean here
+        if impute:
+            covar_[:,:] = covar[j]
         covar[j] = 0
         for i in xrange(N):
-            covar[j] += np.exp(qij[i,j]) * np.outer(data[i]-mean[j], (data[i]-mean[j]).T)
-        covar[j] /= qj[j]
+            covar[j] += Q_i[i] * np.outer(data[i]-mean[j], (data[i]-mean[j]).T)
+        if impute == 0:
+            covar[j] /= qj[j]
+        else:
+            covar[j] /= qj_in[j]
+            covar[j] += qj_out[j] / qj[j] * covar_
+        # now update means
         for d in xrange(D):
-            mean[j,d] = (data[:,d] * np.exp(qij[:,j])).sum()/qj[j]
+            mean[j,d] = (data[:,d] * Q_i).sum()/qj[j]
 
+def I(amp, mean, covar, impute=0, box_limits=None):
+    return draw(amp, mean, covar, size=impute, box_limits=box_limits)
+    
 def initialize(amp, mean, covar):
+    K = amp.size
     # initialize GMM with equal weigths, random positions, fixed covariances
     amp[:] = 1./K
     mean[:,:] = np.random.random(size=(K, D))
     target_size = 0.1
     covar[:,:,:] = np.tile(target_size**2 * np.eye(D), (K,1,1))
             
-def run_EM(data, amp, mean, covar):
+def run_EM(data, amp, mean, covar, impute=0, box_limits=None):
     initialize(amp, mean, covar)
-    qij = np.empty((N, K))
+    qij = np.empty((data.shape[0] + impute, K))
 
     iter = 0
     while iter < 10: 
         try:
-            E(data, qij, amp, mean, covar)
-            M(data, qij, amp, mean, covar)
+            if impute == 0:
+                E(data, qij, amp, mean, covar)
+                M(data, qij, amp, mean, covar)
+            else:
+                data_out = I(amp, mean, covar, impute=impute, box_limits=box_limits)
+                data_ = np.concatenate((data, data_out), axis=0)
+                
+                E(data_, qij, amp, mean, covar)
+                M(data_, qij, amp, mean, covar, impute=impute)
         except np.linalg.linalg.LinAlgError:
             iter = 0
             initialize(amp, mean, covar)
@@ -133,19 +163,41 @@ def plotResults(data, sel, amp, mean, covar):
     ax.add_artist(rect)
     ax.set_xlim(-0.5, 1.5)
     ax.set_ylim(-0.5, 1.5)
-    
+    plt.show()
 
-    
+def run_test(data, K=3, R=100, sel=None, box_limits=None):
+    # now with imputation
+    amp = None
+    mean = None
+    covar = None
+    for r in range(R):
+        print r
+        amp_ = np.empty(K)
+        mean_ = np.empty((K, D))
+        covar_ = np.empty((K, D, D))
+        if sel is None:
+            run_EM(data, amp_, mean_, covar_)
+        else:
+            run_EM(data, amp_, mean_, covar_, impute=(sel==False).sum(), box_limits=box_limits)
+        if amp is None:
+            amp = amp_
+            mean = mean_
+            covar = covar_
+        else:
+            amp = np.concatenate((amp, amp_))
+            mean = np.concatenate((mean, mean_), axis=0)
+            covar = np.concatenate((covar, covar_), axis=0)
+    amp /= amp.sum()
+    return amp, mean, covar
 
     
 
 # draw N points from 3-component GMM
-D = 2
 N = 400
 orig = draw(np.array([ 0.36060026,  0.27986906,  0.15506774]),
             np.array([[ 0.24816886,  0.21300697],
                       [ 0.67306351,  0.6109532 ],
-                      [ 0.01887670,  0.902077]]),
+                      [ 0.02087670,  0.902077]]),
             np.array([[[ 0.08530014, -0.00314178],
                        [-0.00314178,  0.00541106]],
                       [[ 0.05453402, -0.0195736],
@@ -156,31 +208,17 @@ orig = draw(np.array([ 0.36060026,  0.27986906,  0.15506774]),
 box_limits = np.array([[0,0],[1,1]])
 sel = getBoxSelection(box_limits, orig)
 data = orig[sel]
-N = sel.sum()
 
-
-K = 5
-amp = None
-mean = None
-covar = None
-for R in range(100):
-    print R
-    amp_ = np.empty(K)
-    mean_ = np.empty((K, D))
-    covar_ = np.empty((K, D, D))
-    run_EM(data, amp_, mean_, covar_)
-    if amp is None:
-        amp = amp_
-        mean = mean_
-        covar = covar_
-    else:
-        amp = np.concatenate((amp, amp_))
-        mean = np.concatenate((mean, mean_), axis=0)
-        covar = np.concatenate((covar, covar_), axis=0)
-
-amp /= amp.sum()
+# without imputation
+K = 3
+R = 100
+amp, mean, covar = run_test(data, K=K, R=R)
 plotResults(orig, sel, amp, mean, covar)
-plt.show()
+
+# with imputation
+amp, mean, covar = run_test(data, K=K, R=R, sel=sel, box_limits=box_limits)
+plotResults(orig, sel, amp, mean, covar)
+
 
 
 
