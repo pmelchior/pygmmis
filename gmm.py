@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 
 D = 2
 
-def draw(amp, mean, covar, size=1, box_limits=None):
+def draw(amp, mean, covar, size=1, sel_callback=None, invert_callback=False):
     amp /= amp.sum()
     # draw indices for components given amplitudes
     K = amp.size
@@ -27,9 +27,11 @@ def draw(amp, mean, covar, size=1, box_limits=None):
             counter += 1
 
     # if subsample outside box is needed:
-    if box_limits is not None:
+    if sel_callback is not None:
         while True:
-            sel_ = (samples[:,0] <= box_limits[0,0]) | (samples[:,0] > box_limits[1,0]) | (samples[:,1] <= box_limits[0,1]) | (samples[:,1] > box_limits[1,1])
+            sel_ = sel_callback(samples)
+            if invert_callback:
+                sel_ = np.invert(sel_)
             size_in = sel_.sum()
             if size_in == size:
                 break
@@ -38,12 +40,6 @@ def draw(amp, mean, covar, size=1, box_limits=None):
         del sel_
     return samples
 
-def getBoxSelection(box_limits, coords, compressed=False):
-    sel = (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
-    if compressed:
-        return np.nonzero(sel)[0]
-    else:
-        return sel
 
 def logsumLogL(ll):
     """Computes log of sum of likelihoods for GMM components.
@@ -108,8 +104,8 @@ def M(data, qij, amp, mean, covar, impute=0):
         for d in xrange(D):
             mean[j,d] = (data[:,d] * Q_i).sum()/qj[j]
 
-def I(amp, mean, covar, impute=0, box_limits=None):
-    return draw(amp, mean, covar, size=impute, box_limits=box_limits)
+def I(amp, mean, covar, impute=0, sel_callback=None):
+    return draw(amp, mean, covar, size=impute, sel_callback=sel_callback, invert_callback=True)
     
 def initialize(amp, mean, covar):
     K = amp.size
@@ -119,17 +115,17 @@ def initialize(amp, mean, covar):
     target_size = 0.1
     covar[:,:,:] = np.tile(target_size**2 * np.eye(D), (K,1,1))
             
-def run_EM(data, amp, mean, covar, impute=0, box_limits=None):
+def run_EM(data, amp, mean, covar, impute=0, sel_callback=None):
     initialize(amp, mean, covar)
 
     iter = 0
-    while iter < 40: 
+    while iter < 50: 
         try:
-            if impute == 0 or iter < 20:
+            if impute == 0 or iter < 25:
                 qij = E(data, amp, mean, covar)
                 M(data, qij, amp, mean, covar)
             else:
-                data_out = I(amp, mean, covar, impute=impute, box_limits=box_limits)
+                data_out = I(amp, mean, covar, impute=impute, sel_callback=sel_callback)
                 data_ = np.concatenate((data, data_out), axis=0)
                 
                 qij = E(data_, amp, mean, covar)
@@ -174,7 +170,7 @@ def plotResults(data, sel, amp, mean, covar):
     plt.tight_layout()
     plt.show()
 
-def run_test(data, K=3, R=100, sel=None, box_limits=None):
+def run_test(data, K=3, R=100, sel=None, sel_callback=None):
     # now with imputation
     amp = None
     mean = None
@@ -187,7 +183,7 @@ def run_test(data, K=3, R=100, sel=None, box_limits=None):
         if sel is None:
             run_EM(data, amp_, mean_, covar_)
         else:
-            run_EM(data, amp_, mean_, covar_, impute=(sel==False).sum(), box_limits=box_limits)
+            run_EM(data, amp_, mean_, covar_, impute=(sel==False).sum(), sel_callback=sel_callback)
         if amp is None:
             amp = amp_
             mean = mean_
@@ -199,7 +195,10 @@ def run_test(data, K=3, R=100, sel=None, box_limits=None):
     amp /= amp.sum()
     return amp, mean, covar
 
-    
+def getBoxSelection(coords):
+    box_limits = np.array([[0,0],[1,1]])
+    sel = (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
+    return sel
 
 # draw N points from 3-component GMM
 N = 400
@@ -213,20 +212,20 @@ orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
                        [0.0125736,  0.01075791]],
                       [[ 0.00258605,  0.00409287],
                        [ 0.00409287,  0.01065186]]]), size=N)
+
 # limit data to within the box
-box_limits = np.array([[0,0],[1,1]])
-sel = getBoxSelection(box_limits, orig)
+sel = getBoxSelection(orig)
 data = orig[sel]
 
 # without imputation
 K = 3
-R = 40
+R = 100
 
 amp, mean, covar = run_test(data, K=K, R=R)
 plotResults(orig, sel, amp, mean, covar)
 
 # with imputation
-amp, mean, covar = run_test(data, K=K, R=R, sel=sel, box_limits=box_limits)
+amp, mean, covar = run_test(data, K=K, R=R, sel=sel, sel_callback=getBoxSelection)
 plotResults(orig, sel, amp, mean, covar)
 
 
