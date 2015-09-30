@@ -86,7 +86,7 @@ def M(data, qij, amp, mean, covar, impute=0):
         
     for j in xrange(K):
         Q_i = np.exp(qij[:,j])
-        amp[j] = Q_i.sum()/(N+impute)
+        amp[j] = qj[j]/(N+impute)
         
         # do covar first since we can do this without a copy of mean here
         if impute:
@@ -121,7 +121,7 @@ def run_EM(data, amp, mean, covar, impute=0, sel_callback=None):
     iter = 0
     while iter < 50: 
         try:
-            if impute == 0 or iter < 25:
+            if impute == 0 or iter < 25 or iter % 2 == 0:
                 qij = E(data, amp, mean, covar)
                 M(data, qij, amp, mean, covar)
             else:
@@ -195,10 +195,16 @@ def run_test(data, K=3, R=100, sel=None, sel_callback=None):
     amp /= amp.sum()
     return amp, mean, covar
 
-def getBoxSelection(coords):
+def getBox(coords):
     box_limits = np.array([[0,0],[1,1]])
-    sel = (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
-    return sel
+    return (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
+
+def getHole(coords):
+    x,y,r = 0.65, 0.6, 0.2
+    return ((coords[:,0] - x)**2 + (coords[:,1] - y)**2 > r**2)
+
+def getBoxWithHole(coords):
+    return getBox(coords)*getHole(coords)
 
 # draw N points from 3-component GMM
 N = 400
@@ -214,18 +220,19 @@ orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
                        [ 0.00409287,  0.01065186]]]), size=N)
 
 # limit data to within the box
-sel = getBoxSelection(orig)
+cb = getHole
+sel = cb(orig)
 data = orig[sel]
 
 # without imputation
 K = 3
-R = 100
+R = 10
 
 amp, mean, covar = run_test(data, K=K, R=R)
 plotResults(orig, sel, amp, mean, covar)
 
 # with imputation
-amp, mean, covar = run_test(data, K=K, R=R, sel=sel, sel_callback=getBoxSelection)
+amp, mean, covar = run_test(data, K=K, R=R, sel=sel, sel_callback=cb)
 plotResults(orig, sel, amp, mean, covar)
 
 
