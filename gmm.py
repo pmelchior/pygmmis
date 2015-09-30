@@ -68,14 +68,16 @@ def logsumLogL(ll):
     c = np.where(underflow < overflow, underflow, overflow)
     return np.log(np.exp(ll + c).sum(axis=0)) - c
 
-def E(data, qij, amp, mean, covar):
+def E(data, amp, mean, covar):
     K = amp.size
+    qij = np.empty((data.shape[0], K))
     for j in xrange(K):
         dx = data - mean[j]
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(covar[j]), dx.T))
         qij[:,j] = np.log(amp[j]) - np.log((2*np.pi)**D * np.linalg.det(covar[j]))/2 - chi2/2
     for j in xrange(K):
         qij[:,j] -= logsumLogL(qij.T)
+    return qij
 
 def M(data, qij, amp, mean, covar, impute=0):
     K = amp.size
@@ -117,19 +119,18 @@ def initialize(amp, mean, covar):
             
 def run_EM(data, amp, mean, covar, impute=0, box_limits=None):
     initialize(amp, mean, covar)
-    qij = np.empty((data.shape[0] + impute, K))
 
     iter = 0
     while iter < 10: 
         try:
-            if impute == 0:
-                E(data, qij, amp, mean, covar)
+            if impute == 0 or iter < 5:
+                qij = E(data, amp, mean, covar)
                 M(data, qij, amp, mean, covar)
             else:
                 data_out = I(amp, mean, covar, impute=impute, box_limits=box_limits)
                 data_ = np.concatenate((data, data_out), axis=0)
                 
-                E(data_, qij, amp, mean, covar)
+                qij = E(data_, amp, mean, covar)
                 M(data_, qij, amp, mean, covar, impute=impute)
         except np.linalg.linalg.LinAlgError:
             iter = 0
@@ -155,7 +156,6 @@ def plotResults(data, sel, amp, mean, covar):
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(covar[j]), dx.T))
         qij[:,j] = np.log(amp[j]) - np.log((2*np.pi)**D * np.linalg.det(covar[j]))/2 - chi2/2
     p = np.arcsinh(np.exp(logsumLogL(qij.T).reshape((B,B))) / 1e-4)
-    #ax.imshow(p, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
     ax.contourf(p, 10, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
 
     # plot boundary
@@ -194,10 +194,10 @@ def run_test(data, K=3, R=100, sel=None, box_limits=None):
 
 # draw N points from 3-component GMM
 N = 400
-orig = draw(np.array([ 0.36060026,  0.27986906,  0.176774]),
+orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
             np.array([[ 0.20016886,  0.21300697],
                       [ 0.60306351,  0.6709532 ],
-                      [ 0.02087670,  0.902077]]),
+                      [ 0.015087670,  0.852077]]),
             np.array([[[ 0.08530014, -0.00314178],
                        [-0.00314178,  0.00541106]],
                       [[ 0.05453402, 0.0195736],
