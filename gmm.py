@@ -91,6 +91,7 @@ def M(data, qij, amp, mean, covar, impute=0):
     for j in xrange(K):
         Q_i = np.exp(qij[:,j])
         amp[j] = Q_i.sum()/(N+impute)
+        
         # do covar first since we can do this without a copy of mean here
         if impute:
             covar_[:,:] = covar[j]
@@ -102,6 +103,7 @@ def M(data, qij, amp, mean, covar, impute=0):
         else:
             covar[j] /= qj_in[j]
             covar[j] += qj_out[j] / qj[j] * covar_
+            
         # now update means
         for d in xrange(D):
             mean[j,d] = (data[:,d] * Q_i).sum()/qj[j]
@@ -121,9 +123,9 @@ def run_EM(data, amp, mean, covar, impute=0, box_limits=None):
     initialize(amp, mean, covar)
 
     iter = 0
-    while iter < 10: 
+    while iter < 40: 
         try:
-            if impute == 0 or iter < 5:
+            if impute == 0 or iter < 20:
                 qij = E(data, amp, mean, covar)
                 M(data, qij, amp, mean, covar)
             else:
@@ -132,14 +134,18 @@ def run_EM(data, amp, mean, covar, impute=0, box_limits=None):
                 
                 qij = E(data_, amp, mean, covar)
                 M(data_, qij, amp, mean, covar, impute=impute)
+                #sel = np.ones(data.shape[0] + impute, dtype='bool')
+                #sel[-impute:] = 0
+                #plotResults(data_, sel, amp, mean, covar)
         except np.linalg.linalg.LinAlgError:
             iter = 0
             initialize(amp, mean, covar)
         iter += 1
 
 def plotResults(data, sel, amp, mean, covar):
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+    K = amp.size
+    fig = plt.figure(figsize=(5,5))
+    ax = fig.add_subplot(111, aspect='equal')
 
     # plot inner and outer points
     ax.plot(data[:,0][sel], data[:,1][sel], 'bo', mec='None')
@@ -155,14 +161,17 @@ def plotResults(data, sel, amp, mean, covar):
         dx = coords - mean[j]
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(covar[j]), dx.T))
         qij[:,j] = np.log(amp[j]) - np.log((2*np.pi)**D * np.linalg.det(covar[j]))/2 - chi2/2
-    p = np.arcsinh(np.exp(logsumLogL(qij.T).reshape((B,B))) / 1e-4)
-    ax.contourf(p, 10, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
+    p = np.arcsinh(np.exp(logsumLogL(qij.T).reshape((B,B))) / 1e-2)
+    cs = ax.contourf(p, 10, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
+    for c in cs.collections:
+        c.set_edgecolor(c.get_facecolor())
 
     # plot boundary
     rect = patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted')
     ax.add_artist(rect)
     ax.set_xlim(-0.5, 1.5)
     ax.set_ylim(-0.5, 1.5)
+    plt.tight_layout()
     plt.show()
 
 def run_test(data, K=3, R=100, sel=None, box_limits=None):
@@ -195,13 +204,13 @@ def run_test(data, K=3, R=100, sel=None, box_limits=None):
 # draw N points from 3-component GMM
 N = 400
 orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
-            np.array([[ 0.20016886,  0.21300697],
-                      [ 0.60306351,  0.6709532 ],
-                      [ 0.015087670,  0.852077]]),
+            np.array([[ 0.08016886,  0.21300697],
+                      [ 0.70306351,  0.6709532 ],
+                      [ 0.01087670,  0.852077]]),
             np.array([[[ 0.08530014, -0.00314178],
                        [-0.00314178,  0.00541106]],
-                      [[ 0.05453402, 0.0195736],
-                       [0.0195736,  0.01475791]],
+                      [[ 0.03053402, 0.0125736],
+                       [0.0125736,  0.01075791]],
                       [[ 0.00258605,  0.00409287],
                        [ 0.00409287,  0.01065186]]]), size=N)
 # limit data to within the box
@@ -211,7 +220,8 @@ data = orig[sel]
 
 # without imputation
 K = 3
-R = 100
+R = 40
+
 amp, mean, covar = run_test(data, K=K, R=R)
 plotResults(orig, sel, amp, mean, covar)
 
