@@ -67,38 +67,38 @@ class IEMGMM:
             dx = data - self.mean[j]
             chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[j]), dx.T))
             qij[:,j] = np.log(self.amp[j]) - np.log((2*np.pi)**self.D * np.linalg.det(self.covar[j]))/2 - chi2/2
-        qn = self.logsumLogL(qij.T)
-        for j in xrange(self.K):
-            qij[:,j] -= qn
         return qij
 
     def M(self, data, qij, impute=0):
         N = data.shape[0] - impute
-        qj = np.exp(self.logsumLogL(qij))
+        qi = self.logsumLogL(qij.T)
+        for j in xrange(self.K):
+            qij[:,j] -= qi
+        pj = np.exp(self.logsumLogL(qij))
         if impute:
-            qj_in = np.exp(self.logsumLogL(qij[:-impute]))
-            qj_out = np.exp(self.logsumLogL(qij[-impute:]))
+            pj_in = np.exp(self.logsumLogL(qij[:-impute]))
+            pj_out = np.exp(self.logsumLogL(qij[-impute:]))
             covar_ = np.empty((self.D,self.D))
 
         for j in xrange(self.K):
-            Q_i = np.exp(qij[:,j])
-            self.amp[j] = qj[j]/(N+impute)
+            P_i = np.exp(qij[:,j])
+            self.amp[j] = pj[j]/(N+impute)
 
             # do covar first since we can do this without a copy of mean here
             if impute:
                 covar_[:,:] = self.covar[j]
             self.covar[j] = 0
             for i in xrange(N):
-                self.covar[j] += Q_i[i] * np.outer(data[i]-self.mean[j], (data[i]-self.mean[j]).T)
+                self.covar[j] += P_i[i] * np.outer(data[i]-self.mean[j], (data[i]-self.mean[j]).T)
             if impute == 0:
-                self.covar[j] /= qj[j]
+                self.covar[j] /= pj[j]
             else:
-                self.covar[j] /= qj_in[j]
-                self.covar[j] += qj_out[j] / qj[j] * covar_
+                self.covar[j] /= pj_in[j]
+                self.covar[j] += pj_out[j] / pj[j] * covar_
 
             # now update means
             for d in xrange(self.D):
-                self.mean[j,d] = (data[:,d] * Q_i).sum()/qj[j]
+                self.mean[j,d] = (data[:,d] * P_i).sum()/pj[j]
 
     def I(self, impute=0, sel_callback=None):
         return self.draw(size=impute, sel_callback=sel_callback, invert_callback=True)

@@ -18,14 +18,11 @@ def plotResults(data, sel, gmm, patch=None):
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
     # compute sum_k(p_k(x)) for all x
-    qij = np.empty((B*B,gmm.K))
-    for j in xrange(gmm.K):
-        dx = coords - gmm.mean[j]
-        chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(gmm.covar[j]), dx.T))
-        qij[:,j] = np.log(gmm.amp[j]) - np.log((2*np.pi)**gmm.D * np.linalg.det(gmm.covar[j]))/2 - chi2/2
-
+    qij = gmm.E(coords)
+    qi = gmm.logsumLogL(qij.T)
+    
     # for better visibility use arcshinh stretch
-    p = np.arcsinh(np.exp(gmm.logsumLogL(qij.T).reshape((B,B))) / 1e-2)
+    p = np.arcsinh(np.exp(qi.reshape((B,B))) / 1e-2)
     cs = ax.contourf(p, 10, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
     for c in cs.collections:
         c.set_edgecolor(c.get_facecolor())
@@ -39,6 +36,11 @@ def plotResults(data, sel, gmm, patch=None):
                 ax.add_artist(p)
         else:
             ax.add_artist(patch_)
+
+    # add complete data logL to plot
+    logL = gmm.logsumLogL(gmm.E(data).T).mean()
+    ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
+    
     ax.set_xlim(-0.5, 1.5)
     ax.set_ylim(-0.5, 1.5)
     ax.set_xticks([])
@@ -112,12 +114,11 @@ gmm = IEMGMM(K=3, D=2, R=10)
 # without imputation
 gmm.fit(data, s=0.1)
 plotResults(orig, sel, gmm, patch=ps)
-print "logL = %.3f" % gmm.logsumLogL(gmm.E(orig).T).mean()
+
 
 # with imputation
 gmm.fit(data, s=0.1, sel=sel, sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
-print "logL = %.3f" % gmm.logsumLogL(gmm.E(orig).T).mean()
 
 
 
