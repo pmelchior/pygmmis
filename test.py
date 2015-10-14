@@ -18,11 +18,10 @@ def plotResults(data, sel, gmm, patch=None):
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
     # compute sum_k(p_k(x)) for all x
-    qij = gmm.E(coords)
-    qi = gmm.logsumLogL(qij.T)
+    logL_i = gmm.logL(coords)
     
     # for better visibility use arcshinh stretch
-    p = np.arcsinh(np.exp(qi.reshape((B,B))) / 1e-2)
+    p = np.arcsinh(np.exp(logL_i.reshape((B,B))) / 1e-2)
     cs = ax.contourf(p, 10, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
     for c in cs.collections:
         c.set_edgecolor(c.get_facecolor())
@@ -38,7 +37,7 @@ def plotResults(data, sel, gmm, patch=None):
             ax.add_artist(patch_)
 
     # add complete data logL to plot
-    logL = gmm.logsumLogL(gmm.E(data).T).mean()
+    logL = gmm.logL(data).mean()
     ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
     
     ax.set_xlim(-0.5, 1.5)
@@ -109,18 +108,18 @@ ps = None
 sel = cb(orig)
 data = orig[sel]
 
-gmm = IEMGMM(K=3, D=2, R=10)
+gmm = IEMGMM(K=3, D=2, R=1)
 
 
 # without imputation
 gmm.fit(data, s=0.1)
 plotResults(orig, sel, gmm, patch=ps)
 
-
+"""
 # with imputation
 gmm.fit(data, s=0.1, sel=sel, sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
-
+"""
 
 
 

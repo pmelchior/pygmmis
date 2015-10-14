@@ -37,29 +37,45 @@ class IEMGMM:
     def run_EM(self, data, s=1., impute=0, sel_callback=None):
         self.initializeModel(s)
 
-        # FIXME: need covergence test(s)
-        iter = 0
-        while iter < 50: 
+        it = 0
+        logL0 = None
+        while it < 100: # limit loop in case of no convergence
             try:
+                qij = None
                 if impute == 0 or iter < 25 or iter % 2 == 0:
                     qij = self.E(data)
+                    # compute logL from E before M modifies qij
+                    logL_ = self.logsumLogL(qij.T).mean()
                     self.M(data, qij)
                 else:
                     data_out = self.I(impute=impute, sel_callback=sel_callback)
                     data_ = np.concatenate((data, data_out), axis=0)
-
                     qij = self.E(data_)
+                    # compute logL from E before M modifies qij
+                    logL_ = self.logsumLogL(qij.T).mean()
                     self.M(data_, qij, impute=impute)
+                print " iter %d: %.3f" % (it, logL_)
+
+                # convergence test
+                if it > 0 and logL_ - logL0 < 1e-3:
+                    break
+                else:
+                    logL0 = logL_
+                    
             except np.linalg.linalg.LinAlgError:
-                iter = 0
+                it = 0
                 self.initializeModel(s)
-            iter += 1
+            it += 1
 
     def initializeModel(self, s):
         # set model to random positions with equally sized spheres
         self.amp = np.ones(self.K)/self.K
         self.mean = np.random.random(size=(self.K, self.D))
         self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
+
+    def logL(self, data):
+        qij = self.E(data)
+        return self.logsumLogL(qij.T)
 
     def E(self, data):
         qij = np.empty((data.shape[0], self.K))
