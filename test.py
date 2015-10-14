@@ -73,6 +73,7 @@ def getTaperedDensity(coords):
 N = 400
 gmm = IEMGMM(K=3, D=2)
 gmm.amp = np.array([ 0.36060026,  0.27986906,  0.206774])
+gmm.amp /= gmm.amp.sum()
 gmm.mean = np.array([[ 0.08016886,  0.21300697],
                      [ 0.70306351,  0.6709532 ],
                      [ 0.01087670,  0.852077]])

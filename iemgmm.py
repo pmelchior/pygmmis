@@ -11,12 +11,6 @@ class IEMGMM:
         self.mean = None
         self.covar = None
         
-    def initializeModel(self, s):
-        # set model to random positions with equally sized spheres
-        self.amp = np.ones(self.K)/self.K
-        self.mean = np.random.random(size=(self.K, self.D))
-        self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
-
     def fit(self, data, s=1., sel=None, sel_callback=None):
         amp_ = None
         mean_ = None
@@ -61,6 +55,12 @@ class IEMGMM:
                 self.initializeModel(s)
             iter += 1
 
+    def initializeModel(self, s):
+        # set model to random positions with equally sized spheres
+        self.amp = np.ones(self.K)/self.K
+        self.mean = np.random.random(size=(self.K, self.D))
+        self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
+
     def E(self, data):
         qij = np.empty((data.shape[0], self.K))
         for j in xrange(self.K):
@@ -104,9 +104,6 @@ class IEMGMM:
         return self.draw(size=impute, sel_callback=sel_callback, invert_callback=True)
 
     def draw(self, size=1, sel_callback=None, invert_callback=False):
-        # making sure that the amplitudes add up to 1
-        self.amp /= self.amp.sum()
-        
         # draw indices for components given amplitudes
         ind = np.random.choice(self.K, size=size, p=self.amp)
         samples = np.empty((size, self.D))
