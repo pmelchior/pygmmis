@@ -4,9 +4,7 @@ from iemgmm import *
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-def plotResults(data, sel, amp, mean, covar, patch=None):
-    K = amp.size
-    D = mean.shape[1]
+def plotResults(data, sel, gmm, patch=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
@@ -19,12 +17,15 @@ def plotResults(data, sel, amp, mean, covar, patch=None):
     x,y = np.meshgrid(np.linspace(-0.5,1.5,B), np.linspace(-0.5,1.5,B))
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
-    qij = np.empty((B*B,K))
-    for j in xrange(K):
-        dx = coords - mean[j]
-        chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(covar[j]), dx.T))
-        qij[:,j] = np.log(amp[j]) - np.log((2*np.pi)**D * np.linalg.det(covar[j]))/2 - chi2/2
-    p = np.arcsinh(np.exp(logsumLogL(qij.T).reshape((B,B))) / 1e-2)
+    # compute sum_k(p_k(x)) for all x
+    qij = np.empty((B*B,gmm.K))
+    for j in xrange(gmm.K):
+        dx = coords - gmm.mean[j]
+        chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(gmm.covar[j]), dx.T))
+        qij[:,j] = np.log(gmm.amp[j]) - np.log((2*np.pi)**gmm.D * np.linalg.det(gmm.covar[j]))/2 - chi2/2
+
+    # for better visibility use arcshinh stretch
+    p = np.arcsinh(np.exp(gmm.logsumLogL(qij.T).reshape((B,B))) / 1e-2)
     cs = ax.contourf(p, 10, extent=(-0.5,1.5,-0.5,1.5), cmap=plt.cm.Greys)
     for c in cs.collections:
         c.set_edgecolor(c.get_facecolor())
@@ -67,17 +68,19 @@ def getTaperedDensity(coords):
     return mask
 
 # draw N points from 3-component GMM
-N = 500
-orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
-            np.array([[ 0.08016886,  0.21300697],
-                      [ 0.70306351,  0.6709532 ],
-                      [ 0.01087670,  0.852077]]),
-            np.array([[[ 0.08530014, -0.00314178],
+N = 400
+gmm = IEMGMM(K=3, D=2)
+gmm.amp = np.array([ 0.36060026,  0.27986906,  0.206774])
+gmm.mean = np.array([[ 0.08016886,  0.21300697],
+                     [ 0.70306351,  0.6709532 ],
+                     [ 0.01087670,  0.852077]])
+gmm.covar = np.array([[[ 0.08530014, -0.00314178],
                        [-0.00314178,  0.00541106]],
                       [[ 0.03053402, 0.0125736],
                        [0.0125736,  0.01075791]],
                       [[ 0.00258605,  0.00409287],
-                       [ 0.00409287,  0.01065186]]]), size=N)
+                       [ 0.00409287,  0.01065186]]])
+orig = gmm.draw(N)
 
 # limit data to within the box
 
@@ -95,23 +98,26 @@ ps = [patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted'),
       patches.Circle([0.65, 0.6], radius=0.2, fc="none", ec='b', ls='dotted')]
 
 """
+
 cb = getTaperedDensity
 ps = None
 
+# 
 sel = cb(orig)
 data = orig[sel]
 
-# without imputation
-K = 3
-R = 10
+gmm = IEMGMM(K=3, D=2, R=10)
 
-amp, mean, covar = run_test(data, K=K, R=R)
-plotResults(orig, sel, amp, mean, covar, patch=ps)
+
+# without imputation
+gmm.fit(data, s=0.1)
+plotResults(orig, sel, gmm, patch=ps)
+print "logL = %.3f" % gmm.logsumLogL(gmm.E(orig).T).mean()
 
 # with imputation
-amp, mean, covar = run_test(data, K=K, R=R, sel=sel, sel_callback=cb)
-plotResults(orig, sel, amp, mean, covar, patch=ps)
-
+gmm.fit(data, s=0.1, sel=sel, sel_callback=cb)
+plotResults(orig, sel, gmm, patch=ps)
+print "logL = %.3f" % gmm.logsumLogL(gmm.E(orig).T).mean()
 
 
 
