@@ -1,7 +1,7 @@
 #!/bin/env python
 
 import numpy as np
-
+#np.seterr(all='raise')
 class IEMGMM:
     def __init__(self, K=1, D=1, R=1):
         self.K = K
@@ -22,9 +22,9 @@ class IEMGMM:
             else:
                 self.run_EM(data, s=s, impute=(sel==False).sum(), sel_callback=sel_callback)
             if amp_ is None:
-                amp_ = self.amp
-                mean_ = self.mean
-                covar_ = self.covar
+                amp_ = self.amp.copy()
+                mean_ = self.mean.copy()
+                covar_ = self.covar.copy()
             else:
                 amp_ = np.concatenate((amp_, self.amp))
                 mean_ = np.concatenate((mean_, self.mean), axis=0)
@@ -33,39 +33,98 @@ class IEMGMM:
         self.amp = amp_ / amp_.sum()
         self.mean = mean_
         self.covar = covar_
+        self.K *= self.R # need to tell model that it has repeated runs
 
-    def run_EM(self, data, s=1., impute=0, sel_callback=None):
+    def run_EM(self, data, s=1., impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(s)
+        maxiter = 100
 
-        it = 0
-        logL0 = None
-        while it < 100: # limit loop in case of no convergence
-            try:
-                qij = None
-                if impute == 0 or iter < 25 or iter % 2 == 0:
+        # standard EM
+        if impute == 0:
+            it = 0
+            logL0 = None
+            while it < maxiter: # limit loop in case of no convergence
+                try:
                     qij = self.E(data)
                     # compute logL from E before M modifies qij
                     logL_ = self.logsumLogL(qij.T).mean()
                     self.M(data, qij)
-                else:
-                    data_out = self.I(impute=impute, sel_callback=sel_callback)
-                    data_ = np.concatenate((data, data_out), axis=0)
-                    qij = self.E(data_)
-                    # compute logL from E before M modifies qij
-                    logL_ = self.logsumLogL(qij.T).mean()
-                    self.M(data_, qij, impute=impute)
-                print " iter %d: %.3f" % (it, logL_)
+                    print " iter %d: %.3f" % (it, logL_)
 
-                # convergence test
-                if it > 0 and logL_ - logL0 < 1e-3:
+                    # convergence test
+                    if it > 0 and logL_ - logL0 < tol:
+                        break
+                    else:
+                        logL0 = logL_
+                except np.linalg.linalg.LinAlgError:
+                    it = 0
+                    self.initializeModel(s)
+                it += 1
+        # with imputation
+        else:
+            # run standard EM first
+            self.run_EM(data, s=s)
+
+            # for each iteration, draw several fake data sets
+            # estimate mean and std of their logL
+            # test for convergence with Welch's t-test
+            # and adopt their _mean_ model for the next iteration
+            it = 0
+            logL0 = None
+            RD = 10 # repeated draws for imputation
+            logL__ = np.empty(RD)
+            amp__ = np.empty((RD, self.K))
+            mean__ = np.empty((RD, self.K, self.D))
+            covar__ = np.empty((RD, self.K, self.D, self.D))
+            
+            while it < maxiter:
+                amp_ = self.amp.copy()
+                mean_ = self.mean.copy()
+                covar_ = self.covar.copy()
+                
+                rd = 0
+                while rd < RD:
+                    
+                    # reset model to current
+                    self.amp = amp_.copy()
+                    self.mean = mean_.copy()
+                    self.covar = covar_.copy()
+                    
+                    try:
+                        data_out = self.I(impute=impute, sel_callback=sel_callback)
+                        data_ = np.concatenate((data, data_out), axis=0)
+
+                        # perform EM on extended data
+                        qij = self.E(data_)
+                        logL__[rd] = self.logsumLogL(qij.T).mean()
+                        self.M(data_, qij, impute=impute)
+
+                        # save model
+                        amp__[rd,:] = self.amp
+                        mean__[rd,:,:] = self.mean
+                        covar__[rd,:,:,:] = self.covar
+                        print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
+                    except np.linalg.linalg.LinAlgError:
+                        rd -= 1
+                    rd += 1
+                    
+                # convergence test:
+                # in principle one can do Welch's t-test wrt iteration before
+                # but the actual risk here is a run-away, which
+                # drastically _reduces_ the likelihood, at which point we abort
+                print " iter %d: %.3f" % (it, np.array(logL__).mean())
+
+                if it > 0 and logL__.mean() - logL0 < tol:
                     break
                 else:
-                    logL0 = logL_
-                    
-            except np.linalg.linalg.LinAlgError:
-                it = 0
-                self.initializeModel(s)
-            it += 1
+                    logL0 = logL__.mean()
+
+                # because the components remain ordered, we can
+                # adopt the mean of the repeated draws as new model
+                self.amp = amp__.mean(axis=0) 
+                self.mean = mean__.mean(axis=0) 
+                self.covar = covar__.mean(axis=0)
+                it += 1
 
     def initializeModel(self, s):
         # set model to random positions with equally sized spheres

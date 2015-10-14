@@ -69,7 +69,7 @@ def getTaperedDensity(coords):
     return mask
 
 # draw N points from 3-component GMM
-N = 400
+N = 100
 gmm = IEMGMM(K=3, D=2)
 gmm.amp = np.array([ 0.36060026,  0.27986906,  0.206774])
 gmm.amp /= gmm.amp.sum()
@@ -94,32 +94,31 @@ ps = patches.Circle([0.65, 0.6], radius=0.2, fc="none", ec='b', ls='dotted', lw=
 cb = getBox
 ps = patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted')
 """
-"""
+
 cb = getBoxWithHole
 ps = [patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted'),
       patches.Circle([0.65, 0.6], radius=0.2, fc="none", ec='b', ls='dotted')]
 
 """
-
 cb = getTaperedDensity
 ps = None
-
+"""
 # 
 sel = cb(orig)
 data = orig[sel]
 
-gmm = IEMGMM(K=3, D=2, R=1)
+gmm = IEMGMM(K=3, D=2, R=10)
 
 
 # without imputation
+
 gmm.fit(data, s=0.1)
 plotResults(orig, sel, gmm, patch=ps)
 
-"""
 # with imputation
 gmm.fit(data, s=0.1, sel=sel, sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
-"""
+
 
 
 
