@@ -26,8 +26,18 @@ def draw(amp, mean, covar, size=1, sel_callback=None, invert_callback=False):
             samples[counter] = np.random.multivariate_normal(mean[i], covar[i], size=1)
             counter += 1
 
-    # if subsample outside box is needed:
+    # if subsample with selection is required
     if sel_callback is not None:
+        sel_ = sel_callback(samples)
+        if invert_callback:
+            sel_ = np.invert(sel_)
+        size_in = sel_.sum()
+        if size_in != size:
+            ssamples = draw(amp, mean, covar, size=size-size_in, sel_callback=sel_callback, invert_callback=invert_callback)
+            samples = np.concatenate((samples[sel_], ssamples))
+    return samples
+
+"""
         while True:
             sel_ = sel_callback(samples)
             if invert_callback:
@@ -39,7 +49,7 @@ def draw(amp, mean, covar, size=1, sel_callback=None, invert_callback=False):
             samples = np.concatenate((samples[sel_], ssamples))
         del sel_
     return samples
-
+    """
 
 def logsumLogL(ll):
     """Computes log of sum of likelihoods for GMM components.
@@ -130,17 +140,14 @@ def run_EM(data, amp, mean, covar, impute=0, sel_callback=None):
                 
                 qij = E(data_, amp, mean, covar)
                 M(data_, qij, amp, mean, covar, impute=impute)
-                #sel = np.ones(data.shape[0] + impute, dtype='bool')
-                #sel[-impute:] = 0
-                #plotResults(data_, sel, amp, mean, covar)
         except np.linalg.linalg.LinAlgError:
             iter = 0
             initialize(amp, mean, covar)
         iter += 1
 
-def plotResults(data, sel, amp, mean, covar):
+def plotResults(data, sel, amp, mean, covar, patch=None):
     K = amp.size
-    fig = plt.figure(figsize=(5,5))
+    fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
     # plot inner and outer points
@@ -163,10 +170,18 @@ def plotResults(data, sel, amp, mean, covar):
         c.set_edgecolor(c.get_facecolor())
 
     # plot boundary
-    rect = patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted')
-    ax.add_artist(rect)
+    if patch is not None:
+        import copy
+        patch_ = copy.copy(patch)
+        if hasattr(patch_, '__iter__'):
+            for p in patch_:
+                ax.add_artist(p)
+        else:
+            ax.add_artist(patch_)
     ax.set_xlim(-0.5, 1.5)
     ax.set_ylim(-0.5, 1.5)
+    ax.set_xticks([])
+    ax.set_yticks([])
     plt.tight_layout()
     plt.show()
 
@@ -206,8 +221,18 @@ def getHole(coords):
 def getBoxWithHole(coords):
     return getBox(coords)*getHole(coords)
 
+def getHalfDensity(coords):
+    mask = np.ones(coords.shape[0], dtype='bool')
+    mask[np.random.random(coords.shape[0]) < 0.5] = 0
+    return mask
+
+def getTaperedDensity(coords):
+    mask = np.ones(coords.shape[0], dtype='bool')
+    mask[np.random.random(coords.shape[0]) < coords[:,0]] = 0
+    return mask
+
 # draw N points from 3-component GMM
-N = 400
+N = 500
 orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
             np.array([[ 0.08016886,  0.21300697],
                       [ 0.70306351,  0.6709532 ],
@@ -220,7 +245,24 @@ orig = draw(np.array([ 0.36060026,  0.27986906,  0.206774]),
                        [ 0.00409287,  0.01065186]]]), size=N)
 
 # limit data to within the box
+
+"""
 cb = getHole
+ps = patches.Circle([0.65, 0.6], radius=0.2, fc="none", ec='b', ls='dotted', lw=1)
+"""
+"""
+cb = getBox
+ps = patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted')
+"""
+"""
+cb = getBoxWithHole
+ps = [patches.Rectangle([0,0], 1, 1, fc="none", ec='b', ls='dotted'),
+      patches.Circle([0.65, 0.6], radius=0.2, fc="none", ec='b', ls='dotted')]
+
+"""
+cb = getTaperedDensity
+ps = None
+
 sel = cb(orig)
 data = orig[sel]
 
@@ -229,11 +271,12 @@ K = 3
 R = 10
 
 amp, mean, covar = run_test(data, K=K, R=R)
-plotResults(orig, sel, amp, mean, covar)
+plotResults(orig, sel, amp, mean, covar, patch=ps)
 
 # with imputation
 amp, mean, covar = run_test(data, K=K, R=R, sel=sel, sel_callback=cb)
-plotResults(orig, sel, amp, mean, covar)
+plotResults(orig, sel, amp, mean, covar, patch=ps)
+
 
 
 
