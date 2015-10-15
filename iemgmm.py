@@ -195,7 +195,11 @@ class IEMGMM:
                 self.mean[j,d] = (data[:,d] * pi).sum()/pj[j]
 
     def I(self, impute=0, sel_callback=None):
-        return self.draw(size=impute, sel_callback=sel_callback, invert_callback=True)
+        # create imputation sample from the current model
+        # we don know the number if missing values exactly, so
+        # draw from a Poisson distribution
+        n_samples = np.random.poisson(impute)
+        return self.draw(size=n_samples, sel_callback=sel_callback, invert_callback=True)
 
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
