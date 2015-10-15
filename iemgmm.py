@@ -1,7 +1,7 @@
 #!/bin/env python
 
 import numpy as np
-#np.seterr(all='raise')
+np.seterr(invalid='raise')
 class IEMGMM:
     def __init__(self, K=1, D=1, R=1):
         self.K = K
@@ -36,7 +36,7 @@ class IEMGMM:
         self.K *= self.R # need to tell model that it has repeated runs
 
     def run_EM(self, data, s=1., impute=0, sel_callback=None, tol=1e-3):
-        self.initializeModel(s)
+        self.initializeModel(data, s)
         maxiter = 100
 
         # standard EM
@@ -56,22 +56,22 @@ class IEMGMM:
                         break
                     else:
                         logL0 = logL_
-                except np.linalg.linalg.LinAlgError:
+                    it += 1
+                except (np.linalg.linalg.LinAlgError, FloatingPointError):
+                    print "ran into trouble, restarting fit"
                     it = 0
-                    self.initializeModel(s)
-                it += 1
+                    self.initializeModel(data, s)
         # with imputation
         else:
             # run standard EM first
-            self.run_EM(data, s=s)
+            self.run_EM(data, s=s, tol=1e-2)
 
             # for each iteration, draw several fake data sets
-            # estimate mean and std of their logL
-            # test for convergence with Welch's t-test
+            # estimate mean and std of their logL, test for convergence,
             # and adopt their _mean_ model for the next iteration
             it = 0
             logL0 = None
-            RD = 10 # repeated draws for imputation
+            RD = 5 # repeated draws for imputation
             logL__ = np.empty(RD)
             amp__ = np.empty((RD, self.K))
             mean__ = np.empty((RD, self.K, self.D))
@@ -126,10 +126,12 @@ class IEMGMM:
                 self.covar = covar__.mean(axis=0)
                 it += 1
 
-    def initializeModel(self, s):
+    def initializeModel(self, data, s):
         # set model to random positions with equally sized spheres
         self.amp = np.ones(self.K)/self.K
-        self.mean = np.random.random(size=(self.K, self.D))
+        min_pos = data.min(axis=0)
+        max_pos = data.max(axis=0)
+        self.mean = min_pos + (max_pos-min_pos)*np.random.random(size=(self.K, self.D))
         self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
 
     def logL(self, data):
@@ -138,49 +140,70 @@ class IEMGMM:
 
     def E(self, data):
         qij = np.empty((data.shape[0], self.K))
+        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         for j in xrange(self.K):
             dx = data - self.mean[j]
             chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[j]), dx.T))
-            qij[:,j] = np.log(self.amp[j]) - np.log((2*np.pi)**self.D * np.linalg.det(self.covar[j]))/2 - chi2/2
+            # prevent tiny negative determinants to mess up
+            (sign, logdet) = np.linalg.slogdet(self.covar[j])
+            qij[:,j] = np.log(self.amp[j]) - log2piD2 - sign*logdet/2 - chi2/2
         return qij
 
     def M(self, data, qij, impute=0):
         N = data.shape[0] - impute
+        # log of fractional probability
         qi = self.logsumLogL(qij.T)
         for j in xrange(self.K):
             qij[:,j] -= qi
-        pj = np.exp(self.logsumLogL(qij))
-        if impute:
-            pj_in = np.exp(self.logsumLogL(qij[:-impute]))
-            pj_out = np.exp(self.logsumLogL(qij[-impute:]))
-            covar_ = np.empty((self.D,self.D))
+        qj = self.logsumLogL(qij)
 
+        # add constant to prevent underflow
+        c = 10.
+        pj = np.exp(qj + c)
+        self.amp = pj/(N+impute)/np.exp(c)
+
+        if impute:
+            pj_in = np.exp(self.logsumLogL(qij[:-impute]) + c)
+            pj_out = np.exp(self.logsumLogL(qij[-impute:]) + c)
+            covar_ = np.empty((self.D,self.D))
         for j in xrange(self.K):
-            P_i = np.exp(qij[:,j])
-            self.amp[j] = pj[j]/(N+impute)
+            pi = np.exp(qij[:,j] + c)
 
             # do covar first since we can do this without a copy of mean here
             if impute:
                 covar_[:,:] = self.covar[j]
             self.covar[j] = 0
             for i in xrange(N):
-                self.covar[j] += P_i[i] * np.outer(data[i]-self.mean[j], (data[i]-self.mean[j]).T)
+                self.covar[j] += pi[i] * np.outer(data[i]-self.mean[j], (data[i]-self.mean[j]).T)
             if impute == 0:
-                self.covar[j] /= pj[j]
+                try:
+                    self.covar[j] /= pj[j]
+                except FloatingPointError:
+                    print self.covar[j], pi, pj[j]
+                    raise FloatingPointError
+                
             else:
-                self.covar[j] /= pj_in[j]
-                self.covar[j] += pj_out[j] / pj[j] * covar_
+                try:
+                    self.covar[j] /= pj_in[j]
+                    self.covar[j] += pj_out[j] / pj[j] * covar_
+                except FloatingPointError:
+                    print self.covar[j], pj_in[j], pj_out
+                    raise FloatingPointError
 
             # now update means
             for d in xrange(self.D):
-                self.mean[j,d] = (data[:,d] * P_i).sum()/pj[j]
+                self.mean[j,d] = (data[:,d] * pi).sum()/pj[j]
 
     def I(self, impute=0, sel_callback=None):
         return self.draw(size=impute, sel_callback=sel_callback, invert_callback=True)
 
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
-        ind = np.random.choice(self.K, size=size, p=self.amp)
+        try:
+            ind = np.random.choice(self.K, size=size, p=self.amp)
+        except (FloatingPointError, ValueError):
+            print self.K, size, self.amp
+            raise FloatingPointError
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
@@ -222,10 +245,9 @@ class IEMGMM:
         (N, 1) of log of total likelihood
 
         """
-        # typo in eq. 58: log(N) -> log(K)
-        floatinfo = np.finfo('d')
+        floatinfo = np.finfo('float64')
         underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
-        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(self.K)
+        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(max(ll.shape))
         c = np.where(underflow < overflow, underflow, overflow)
         return np.log(np.exp(ll + c).sum(axis=0)) - c
 
