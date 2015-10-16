@@ -1,8 +1,9 @@
 #!/bin/env python
 
 import numpy as np
-np.seterr(invalid='raise')
+
 class IEMGMM:
+    
     def __init__(self, K=1, D=1, R=1):
         self.K = K
         self.D = D
@@ -11,16 +12,16 @@ class IEMGMM:
         self.mean = None
         self.covar = None
         
-    def fit(self, data, s=1., sel=None, sel_callback=None):
+    def fit(self, data, s=1., w=0, sel=None, sel_callback=None):
         amp_ = None
         mean_ = None
         covar_ = None
         for r in range(self.R):
             print r
             if sel is None:
-                self.run_EM(data, s=s)
+                self.run_EM(data, s=s, w=w)
             else:
-                self.run_EM(data, s=s, impute=(sel==False).sum(), sel_callback=sel_callback)
+                self.run_EM(data, s=s, w=w, impute=(sel==False).sum(), sel_callback=sel_callback)
             if amp_ is None:
                 amp_ = self.amp.copy()
                 mean_ = self.mean.copy()
@@ -35,7 +36,7 @@ class IEMGMM:
         self.covar = covar_
         self.K *= self.R # need to tell model that it has repeated runs
 
-    def run_EM(self, data, s=1., impute=0, sel_callback=None, tol=1e-3):
+    def run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(data, s)
         maxiter = 100
 
@@ -44,11 +45,14 @@ class IEMGMM:
             it = 0
             logL0 = None
             while it < maxiter: # limit loop in case of no convergence
+                amp_ = self.amp.copy()
+                mean_ = self.mean.copy()
+                covar_ = self.covar.copy()
                 try:
                     qij = self.E(data)
                     # compute logL from E before M modifies qij
                     logL_ = self.logsumLogL(qij.T).mean()
-                    self.M(data, qij)
+                    self.M(data, qij, w=w)
                     print " iter %d: %.3f" % (it, logL_)
 
                     # convergence test
@@ -57,14 +61,19 @@ class IEMGMM:
                     else:
                         logL0 = logL_
                     it += 1
-                except (np.linalg.linalg.LinAlgError, FloatingPointError):
-                    print "ran into trouble, restarting fit"
-                    it = 0
-                    self.initializeModel(data, s)
+                    amp_ = self.amp.copy()
+                    mean_ = self.mean.copy()
+                    covar_ = self.covar.copy()
+                except np.linalg.linalg.LinAlgError:
+                    print "warning: ran into trouble, stopping fit at previous position"
+                    self.amp = amp_
+                    self.mean = mean_
+                    self.covar = covar_
+                    break
         # with imputation
         else:
             # run standard EM first
-            self.run_EM(data, s=s, tol=1e-2)
+            self.run_EM(data, s=s, w=w, tol=1e-2)
 
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
@@ -97,7 +106,7 @@ class IEMGMM:
                         # perform EM on extended data
                         qij = self.E(data_)
                         logL__[rd] = self.logsumLogL(qij.T).mean()
-                        self.M(data_, qij, impute=impute)
+                        self.M(data_, qij, w=w, impute=impute)
 
                         # save model
                         amp__[rd,:] = self.amp
@@ -149,7 +158,7 @@ class IEMGMM:
             qij[:,j] = np.log(self.amp[j]) - log2piD2 - sign*logdet/2 - chi2/2
         return qij
 
-    def M(self, data, qij, impute=0):
+    def M(self, data, qij, w=0, impute=0):
         N = data.shape[0] - impute
         # log of fractional probability
         qi = self.logsumLogL(qij.T)
@@ -176,19 +185,18 @@ class IEMGMM:
             for i in xrange(N):
                 self.covar[j] += pi[i] * np.outer(data[i]-self.mean[j], (data[i]-self.mean[j]).T)
             if impute == 0:
-                try:
+                if w == 0:
                     self.covar[j] /= pj[j]
-                except FloatingPointError:
-                    print self.covar[j], pi, pj[j]
-                    raise FloatingPointError
-                
+                else:
+                    self.covar[j]+= w*np.eye(self.D)
+                    self.covar[j] /= pj[j] + 1
             else:
-                try:
+                if w == 0:
                     self.covar[j] /= pj_in[j]
-                    self.covar[j] += pj_out[j] / pj[j] * covar_
-                except FloatingPointError:
-                    print self.covar[j], pj_in[j], pj_out
-                    raise FloatingPointError
+                else:
+                    self.covar[j]+= w*np.eye(self.D)
+                    self.covar[j] /= pj_in[j] + 1
+                self.covar[j] += pj_out[j] / pj[j] * covar_
 
             # now update means
             for d in xrange(self.D):
@@ -251,7 +259,7 @@ class IEMGMM:
         """
         floatinfo = np.finfo('float64')
         underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
-        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(max(ll.shape))
+        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
         c = np.where(underflow < overflow, underflow, overflow)
         return np.log(np.exp(ll + c).sum(axis=0)) - c
 
