@@ -13,28 +13,27 @@ class IEMGMM:
         self.covar = None
         
     def fit(self, data, s=1., w=0, sel=None, sel_callback=None):
-        amp_ = None
-        mean_ = None
-        covar_ = None
+        amp_r = None
+        mean_r = None
+        covar_r = None
         for r in range(self.R):
             print "fitting model %d..." % r
             if sel is None:
                 self.run_EM(data, s=s, w=w)
             else:
                 self.run_EM(data, s=s, w=w, impute=(sel==False).sum(), sel_callback=sel_callback)
-            if amp_ is None:
-                amp_ = self.amp.copy()
-                mean_ = self.mean.copy()
-                covar_ = self.covar.copy()
+            if amp_r is None:
+                amp_r = self.amp.copy()
+                mean_r = self.mean.copy()
+                covar_r = self.covar.copy()
             else:
-                amp_ = np.concatenate((amp_, self.amp))
-                mean_ = np.concatenate((mean_, self.mean), axis=0)
-                covar_ = np.concatenate((covar_, self.covar), axis=0)
+                amp_r = np.concatenate((amp_r, self.amp))
+                mean_r = np.concatenate((mean_r, self.mean), axis=0)
+                covar_r = np.concatenate((covar_r, self.covar), axis=0)
                 
-        self.amp = amp_ / amp_.sum()
-        self.mean = mean_
-        self.covar = covar_
-        self.K *= self.R # need to tell model that it has repeated runs
+        self.amp = amp_r.copy() / amp_r.sum()
+        self.mean = mean_r.copy()
+        self.covar = covar_r.copy()
 
     def run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(data, s)
@@ -72,8 +71,8 @@ class IEMGMM:
                     break
         # with imputation
         else:
-            # run standard EM first
-            self.run_EM(data, s=s, w=w, tol=1e-2)
+            # run standard EM first, with larger tolerance
+            self.run_EM(data, s=s, w=w, tol=tol*10)
 
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
@@ -95,9 +94,9 @@ class IEMGMM:
                 while rd < RD:
                     
                     # reset model to current
-                    self.amp = amp_.copy()
-                    self.mean = mean_.copy()
-                    self.covar = covar_.copy()
+                    self.amp[:] = amp_[:]
+                    self.mean[:,:] = mean_[:,:]
+                    self.covar[:,:,:] = covar_[:,:,:]
                     
                     try:
                         data_out = self.I(impute=impute, sel_callback=sel_callback)
@@ -109,9 +108,9 @@ class IEMGMM:
                         self.M(data_, qij, w=w, impute=impute)
 
                         # save model
-                        amp__[rd,:] = self.amp
-                        mean__[rd,:,:] = self.mean
-                        covar__[rd,:,:,:] = self.covar
+                        amp__[rd,:] = self.amp[:]
+                        mean__[rd,:,:] = self.mean[:,:]
+                        covar__[rd,:,:,:] = self.covar[:,:,:]
                         print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
                     except np.linalg.linalg.LinAlgError:
                         rd -= 1
@@ -148,9 +147,12 @@ class IEMGMM:
         return self.logsumLogL(qij.T)
 
     def E(self, data):
-        qij = np.empty((data.shape[0], self.K))
+        # use amp.size instead of self.K here because repeated fits will obtain
+        # probablities and logL from E, and they would otherwise only
+        # experience the first model
+        qij = np.empty((data.shape[0], self.amp.size))
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        for j in xrange(self.K):
+        for j in xrange(self.amp.size):
             dx = data - self.mean[j]
             chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[j]), dx.T))
             # prevent tiny negative determinants to mess up
