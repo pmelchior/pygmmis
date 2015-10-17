@@ -13,27 +13,27 @@ class IEMGMM:
         self.covar = None
         
     def fit(self, data, s=1., w=0, sel=None, sel_callback=None):
-        amp_r = None
-        mean_r = None
-        covar_r = None
+        amp_r = np.empty((self.R * self.K))
+        mean_r = np.empty((self.R * self.K, self.D))
+        covar_r = np.empty((self.R * self.K, self.D, self.D))
         for r in range(self.R):
             print "fitting model %d..." % r
             if sel is None:
                 self.run_EM(data, s=s, w=w)
             else:
                 self.run_EM(data, s=s, w=w, impute=(sel==False).sum(), sel_callback=sel_callback)
-            if amp_r is None:
-                amp_r = self.amp.copy()
-                mean_r = self.mean.copy()
-                covar_r = self.covar.copy()
-            else:
-                amp_r = np.concatenate((amp_r, self.amp))
-                mean_r = np.concatenate((mean_r, self.mean), axis=0)
-                covar_r = np.concatenate((covar_r, self.covar), axis=0)
+
+            # weight the current model with its likelihood
+            self.amp *= np.exp(self.logL(data).mean())
+
+            # store for mixture later
+            amp_r[r*self.K:(r+1)*self.K] = self.amp
+            mean_r[r*self.K:(r+1)*self.K] = self.mean
+            covar_r[r*self.K:(r+1)*self.K] = self.covar
                 
-        self.amp = amp_r.copy() / amp_r.sum()
-        self.mean = mean_r.copy()
-        self.covar = covar_r.copy()
+        self.amp = amp_r / amp_r.sum()
+        self.mean = mean_r
+        self.covar = covar_r
 
     def run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(data, s)

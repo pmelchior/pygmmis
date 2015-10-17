@@ -90,15 +90,15 @@ orig = gmm.draw(N)
 cb = getHole
 ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted', lw=1)
 """
-
+"""
 cb = getBox
 ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
-
 """
+
 cb = getBoxWithHole
 ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
       patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
-"""
+
 """
 cb = getTaperedDensity
 ps = None
@@ -107,15 +107,14 @@ ps = None
 sel = cb(orig)
 data = orig[sel]
 
-gmm = IEMGMM(K=3, D=2, R=4)
-
+gmm = IEMGMM(K=3, D=2, R=10)
 
 # without imputation
-gmm.fit(data, s=10)
+gmm.fit(data, s=5, w=0.1)
 plotResults(orig, sel, gmm, patch=ps)
 
 # with imputation
-gmm.fit(data, s=10, sel=sel, sel_callback=cb)
+gmm.fit(data, s=5, w=0.1, sel=sel, sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
 
 
