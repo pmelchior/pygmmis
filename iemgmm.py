@@ -159,7 +159,8 @@ class IEMGMM:
         return qij
 
     def M(self, data, qij, w=0, impute=0):
-        N = data.shape[0] - impute
+        N = data.shape[0]
+        
         # log of fractional probability
         qi = self.logsumLogL(qij.T)
         for j in xrange(self.K):
@@ -168,40 +169,35 @@ class IEMGMM:
         pj = np.exp(qj)
 
         # amplitude update
-        self.amp = pj/(N+impute)
-
-        if impute:
-            pj_in = np.exp(self.logsumLogL(qij[:-impute]))
+        self.amp = pj/N
+        
+        # covariance: with imputation we need add penalty term from
+        # the conditional probability of drawing points from the model:
+        # p_out / p * Sigma_j (i.e. fractional prob of imputed points)
+        if impute == 0:
+            self.covar[:,:,:] = 0
+        else:
             pj_out = np.exp(self.logsumLogL(qij[-impute:]))
-            covar_ = np.empty((self.D,self.D))
+            self.covar *= (pj_out / pj)[:, None, None]
             
         for j in xrange(self.K):
             pi = np.exp(qij[:,j])
 
-            # do covar first since we can do this without a copy of mean here
-            if impute:
-                covar_[:,:] = self.covar[j]
-            self.covar[j] = 0
-            d_m = data - self.mean[j]
+            # mean
+            self.mean[j] = (data * pi[:,None]).sum(axis=0)/pj[j]
+
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
-            self.covar[j] = (pi[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
-            if impute == 0:
-                if w == 0:
-                    self.covar[j] /= pj[j]
-                else:
-                    self.covar[j]+= w*np.eye(self.D)
-                    self.covar[j] /= pj[j] + 1
+            d_m = data - self.mean[j]
+            self.covar[j] += (pi[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+            
+            # Bayesian regularization term
+            if w > 0:
+                self.covar[j]+= w*np.eye(self.D)
+                self.covar[j] /= pj[j] + 1
             else:
-                if w == 0:
-                    self.covar[j] /= pj_in[j]
-                else:
-                    self.covar[j]+= w*np.eye(self.D)
-                    self.covar[j] /= pj_in[j] + 1
-                self.covar[j] += pj_out[j] / pj[j] * covar_
+                self.covar[j] /= pj[j]
 
-            # now update means
-            self.mean[j] = (data * pi[:,None]).sum(axis=0)/pj[j]
 
     def I(self, impute=0, sel_callback=None):
         # create imputation sample from the current model
