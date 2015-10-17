@@ -2,40 +2,105 @@
 
 import numpy as np
 
-class IEMGMM:
-    
-    def __init__(self, K=1, D=1, R=1):
+class GMM:
+    def __init__(self, K=1, D=1):
         self.K = K
         self.D = D
-        self.R = R
         self.amp = None
         self.mean = None
         self.covar = None
         
-    def fit(self, data, s=1., w=0, sel=None, sel_callback=None):
+    def draw(self, size=1, sel_callback=None, invert_callback=False):
+        # draw indices for components given amplitudes
+        try:
+            ind = np.random.choice(self.K, size=size, p=self.amp)
+        except (FloatingPointError, ValueError):
+            print self.K, size, self.amp
+            raise FloatingPointError
+        samples = np.empty((size, self.D))
+        counter = 0
+        if size > self.K:
+            bc = np.bincount(ind)
+            components = np.arange(ind.size)[bc > 0]
+            for c in components:
+                mask = ind == c
+                s = mask.sum()
+                samples[counter:counter+s] = np.random.multivariate_normal(self.mean[c], self.covar[c], size=s)
+                counter += s
+        else:
+            for i in ind:
+                samples[counter] = np.random.multivariate_normal(self.mean[i], self.covar[i], size=1)
+                counter += 1
+
+        # if subsample with selection is required
+        if sel_callback is not None:
+            sel_ = sel_callback(samples)
+            if invert_callback:
+                sel_ = np.invert(sel_)
+            size_in = sel_.sum()
+            if size_in != size:
+                ssamples = self.draw(size=size-size_in, sel_callback=sel_callback, invert_callback=invert_callback)
+                samples = np.concatenate((samples[sel_], ssamples))
+        return samples
+
+    def logsumLogL(self, ll):
+        """Computes log of sum of likelihoods for GMM components.
+
+        This method tries hard to avoid over- or underflow that may arise
+        when computing exp(log(p(x | k)).
+
+        See appendix A of Bovy, Hogg, Roweis (2009).
+
+        Args:
+        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
+
+        Returns:
+        (N, 1) of log of total likelihood
+
+        """
+        floatinfo = np.finfo('float64')
+        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
+        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
+        c = np.where(underflow < overflow, underflow, overflow)
+        return np.log(np.exp(ll + c).sum(axis=0)) - c
+
+
+
+class IEMGMM(GMM):
+    
+    def __init__(self, data, K=1, R=1, s=1., w=0., verbose=False, sel=None, sel_callback=None):
+        self.K = K
+        self.D = data.shape[1]
+        self.R = R
+        self.verbose = verbose
+        self._fit(data, s=s, w=w, sel=sel, sel_callback=sel_callback)
+                 
+    def _fit(self, data, s=1., w=0, sel=None, sel_callback=None):
         amp_r = np.empty((self.R * self.K))
         mean_r = np.empty((self.R * self.K, self.D))
         covar_r = np.empty((self.R * self.K, self.D, self.D))
+        self.ll = np.empty(self.R)
         for r in range(self.R):
-            print "fitting model %d..." % r
+            if self.verbose:
+                print "fitting model %d..." % r
             if sel is None:
-                self.run_EM(data, s=s, w=w)
+                self._run_EM(data, s=s, w=w)
             else:
-                self.run_EM(data, s=s, w=w, impute=(sel==False).sum(), sel_callback=sel_callback)
+                self._run_EM(data, s=s, w=w, impute=(sel==False).sum(), sel_callback=sel_callback)
 
-            # weight the current model with its likelihood
-            self.amp *= np.exp(self.logL(data).mean())
+            # save the current model likelihood
+            self.ll[r] = self.logL(data).mean()
 
             # store for mixture later
             amp_r[r*self.K:(r+1)*self.K] = self.amp
             mean_r[r*self.K:(r+1)*self.K] = self.mean
             covar_r[r*self.K:(r+1)*self.K] = self.covar
-                
+
         self.amp = amp_r / amp_r.sum()
         self.mean = mean_r
         self.covar = covar_r
-
-    def run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
+        
+    def _run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(data, s)
         maxiter = 100
         
@@ -52,7 +117,8 @@ class IEMGMM:
                     # compute logL from E before M modifies qij
                     logL_ = self.logsumLogL(qij.T).mean()
                     self.M(data, qij, w=w)
-                    print " iter %d: %.3f" % (it, logL_)
+                    if self.verbose:
+                        print " iter %d: %.3f" % (it, logL_)
 
                     # convergence test
                     if it > 0 and logL_ - logL0 < tol:
@@ -64,7 +130,8 @@ class IEMGMM:
                     mean_ = self.mean.copy()
                     covar_ = self.covar.copy()
                 except np.linalg.linalg.LinAlgError:
-                    print "warning: ran into trouble, stopping fit at previous position"
+                    if self.verbose:
+                        print "warning: ran into trouble, stopping fit at previous position"
                     self.amp = amp_
                     self.mean = mean_
                     self.covar = covar_
@@ -72,7 +139,7 @@ class IEMGMM:
         # with imputation
         else:
             # run standard EM first, with larger tolerance
-            self.run_EM(data, s=s, w=w, tol=tol*10)
+            self._run_EM(data, s=s, w=w, tol=tol*10)
 
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
@@ -111,7 +178,8 @@ class IEMGMM:
                         amp__[rd,:] = self.amp[:]
                         mean__[rd,:,:] = self.mean[:,:]
                         covar__[rd,:,:,:] = self.covar[:,:,:]
-                        print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
+                        if self.verbose:
+                            print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
                     except np.linalg.linalg.LinAlgError:
                         rd -= 1
                     rd += 1
@@ -120,7 +188,8 @@ class IEMGMM:
                 # in principle one can do Welch's t-test wrt iteration before
                 # but the actual risk here is a run-away, which
                 # drastically _reduces_ the likelihood, at which point we abort
-                print " iter %d: %.3f" % (it, np.array(logL__).mean())
+                if self.verbose:
+                    print " iter %d: %.3f" % (it, np.array(logL__).mean())
 
                 if it > 0 and logL__.mean() - logL0 < tol:
                     break
@@ -208,59 +277,6 @@ class IEMGMM:
         n_samples = np.random.poisson(impute)
         return self.draw(size=n_samples, sel_callback=sel_callback, invert_callback=True)
 
-    def draw(self, size=1, sel_callback=None, invert_callback=False):
-        # draw indices for components given amplitudes
-        try:
-            ind = np.random.choice(self.K, size=size, p=self.amp)
-        except (FloatingPointError, ValueError):
-            print self.K, size, self.amp
-            raise FloatingPointError
-        samples = np.empty((size, self.D))
-        counter = 0
-        if size > self.K:
-            bc = np.bincount(ind)
-            components = np.arange(ind.size)[bc > 0]
-            for c in components:
-                mask = ind == c
-                s = mask.sum()
-                samples[counter:counter+s] = np.random.multivariate_normal(self.mean[c], self.covar[c], size=s)
-                counter += s
-        else:
-            for i in ind:
-                samples[counter] = np.random.multivariate_normal(self.mean[i], self.covar[i], size=1)
-                counter += 1
-
-        # if subsample with selection is required
-        if sel_callback is not None:
-            sel_ = sel_callback(samples)
-            if invert_callback:
-                sel_ = np.invert(sel_)
-            size_in = sel_.sum()
-            if size_in != size:
-                ssamples = self.draw(size=size-size_in, sel_callback=sel_callback, invert_callback=invert_callback)
-                samples = np.concatenate((samples[sel_], ssamples))
-        return samples
-
-    def logsumLogL(self, ll):
-        """Computes log of sum of likelihoods for GMM components.
-
-        This method tries hard to avoid over- or underflow that may arise
-        when computing exp(log(p(x | k)).
-
-        See appendix A of Bovy, Hogg, Roweis (2009).
-
-        Args:
-        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
-
-        Returns:
-        (N, 1) of log of total likelihood
-
-        """
-        floatinfo = np.finfo('float64')
-        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
-        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
-        c = np.where(underflow < overflow, underflow, overflow)
-        return np.log(np.exp(ll + c).sum(axis=0)) - c
 
 
             

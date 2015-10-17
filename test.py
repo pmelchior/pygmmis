@@ -70,7 +70,9 @@ def getTaperedDensity(coords):
 
 # draw N points from 3-component GMM
 N = 400
-gmm = IEMGMM(K=3, D=2)
+D = 2
+blank_data = np.empty((0,D))
+gmm = GMM(K=3, D=D)
 gmm.amp = np.array([ 0.36060026,  0.27986906,  0.206774])
 gmm.amp /= gmm.amp.sum()
 gmm.mean = np.array([[ 0.08016886,  0.21300697],
@@ -107,16 +109,25 @@ ps = None
 sel = cb(orig)
 data = orig[sel]
 
-gmm = IEMGMM(K=3, D=2, R=10)
+K = 3
+R = 10
 
 # without imputation
-gmm.fit(data, s=5, w=0.1)
+gmm = IEMGMM(data, K=K, R=R, s=5, w=0.1)
+plotResults(orig, sel, gmm, patch=ps)
+
+# apply likelihood weighting to amplitudes
+gmm.amp = (np.array(np.split(gmm.amp, R) * np.exp(gmm.ll)[:, None])).reshape(K*R)
+gmm.amp /= gmm.amp.sum()
 plotResults(orig, sel, gmm, patch=ps)
 
 # with imputation
-gmm.fit(data, s=5, w=0.1, sel=sel, sel_callback=cb)
+gmm = IEMGMM(data, K=K, R=R, s=5, w=0.1, sel=sel, sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
 
+gmm.amp = (np.array(np.split(gmm.amp, R) * np.exp(gmm.ll)[:, None])).reshape(K*R)
+gmm.amp /= gmm.amp.sum()
+plotResults(orig, sel, gmm, patch=ps)
 
 
 
