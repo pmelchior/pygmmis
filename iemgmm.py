@@ -12,11 +12,7 @@ class GMM:
         
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
-        try:
-            ind = np.random.choice(self.K, size=size, p=self.amp)
-        except (FloatingPointError, ValueError):
-            print self.K, size, self.amp
-            raise FloatingPointError
+        ind = np.random.choice(self.K, size=size, p=self.amp)
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
@@ -58,7 +54,7 @@ class GMM:
         (N, 1) of log of total likelihood
 
         """
-        floatinfo = np.finfo('float64')
+        floatinfo = np.finfo(ll.dtype)
         underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
         overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
         c = np.where(underflow < overflow, underflow, overflow)
@@ -287,6 +283,11 @@ class IEMGMM(GMM):
         # draw from a Poisson distribution
         n_samples = np.random.poisson(impute)
         return self.draw(size=n_samples, sel_callback=sel_callback, invert_callback=True)
+
+    def weightWithLikelihood(self):
+        # apply likelihood weighting to each model's amplitude
+        self.amp = (np.array(np.split(self.amp, self.R) * np.exp(self.ll)[:, None])).reshape(self.K * self.R)
+        self.amp /= self.amp.sum()
 
 
 

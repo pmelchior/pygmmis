@@ -52,7 +52,7 @@ def getBox(coords):
     return (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
 
 def getHole(coords):
-    x,y,r = 6.5, 6., 2.5
+    x,y,r = 6.5, 6., 2
     return ((coords[:,0] - x)**2 + (coords[:,1] - y)**2 > r**2)
 
 def getBoxWithHole(coords):
@@ -97,7 +97,7 @@ ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
 
 cb = getBoxWithHole
 ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
-      patches.Circle([6.5, 6.], radius=2.5, fc="none", ec='b', ls='dotted')]
+      patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
 
 """
 cb = getTaperedDensity
@@ -109,23 +109,21 @@ sel = cb(orig)
 data = orig[sel]
 
 K = 3
-R = 10
+R = 100
 
 # without imputation
-gmm = IEMGMM(data, K=K, R=R, w=0.1, verbose=True)
+gmm = IEMGMM(data, K=K, R=R, w=0.1)
 plotResults(orig, sel, gmm, patch=ps)
 
 # apply likelihood weighting to amplitudes
-gmm.amp = (np.array(np.split(gmm.amp, R) * np.exp(gmm.ll)[:, None])).reshape(K*R)
-gmm.amp /= gmm.amp.sum()
+gmm.weightWithLikelihood()
 plotResults(orig, sel, gmm, patch=ps)
 
 # with imputation
-gmm = IEMGMM(data, K=K, R=R, w=0.1, verbose=True, sel=sel, sel_callback=cb)
+gmm = IEMGMM(data, K=K, R=R, w=0.1, sel=sel, sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
 
-gmm.amp = (np.array(np.split(gmm.amp, R) * np.exp(gmm.ll)[:, None])).reshape(K*R)
-gmm.amp /= gmm.amp.sum()
+gmm.weightWithLikelihood()
 plotResults(orig, sel, gmm, patch=ps)
 
 
