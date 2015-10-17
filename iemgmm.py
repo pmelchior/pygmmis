@@ -17,7 +17,7 @@ class IEMGMM:
         mean_ = None
         covar_ = None
         for r in range(self.R):
-            print r
+            print "fitting model %d..." % r
             if sel is None:
                 self.run_EM(data, s=s, w=w)
             else:
@@ -39,7 +39,7 @@ class IEMGMM:
     def run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(data, s)
         maxiter = 100
-
+        
         # standard EM
         if impute == 0:
             it = 0
@@ -165,25 +165,27 @@ class IEMGMM:
         for j in xrange(self.K):
             qij[:,j] -= qi
         qj = self.logsumLogL(qij)
+        pj = np.exp(qj)
 
-        # add constant to prevent underflow
-        c = 10.
-        pj = np.exp(qj + c)
-        self.amp = pj/(N+impute)/np.exp(c)
+        # amplitude update
+        self.amp = pj/(N+impute)
 
         if impute:
-            pj_in = np.exp(self.logsumLogL(qij[:-impute]) + c)
-            pj_out = np.exp(self.logsumLogL(qij[-impute:]) + c)
+            pj_in = np.exp(self.logsumLogL(qij[:-impute]))
+            pj_out = np.exp(self.logsumLogL(qij[-impute:]))
             covar_ = np.empty((self.D,self.D))
+            
         for j in xrange(self.K):
-            pi = np.exp(qij[:,j] + c)
+            pi = np.exp(qij[:,j])
 
             # do covar first since we can do this without a copy of mean here
             if impute:
                 covar_[:,:] = self.covar[j]
             self.covar[j] = 0
-            for i in xrange(N):
-                self.covar[j] += pi[i] * np.outer(data[i]-self.mean[j], (data[i]-self.mean[j]).T)
+            d_m = data - self.mean[j]
+            # funny way of saying: for each point i, do the outer product
+            # of d_m with its transpose, multiply with pi[i], and sum over i
+            self.covar[j] = (pi[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             if impute == 0:
                 if w == 0:
                     self.covar[j] /= pj[j]
@@ -199,8 +201,7 @@ class IEMGMM:
                 self.covar[j] += pj_out[j] / pj[j] * covar_
 
             # now update means
-            for d in xrange(self.D):
-                self.mean[j,d] = (data[:,d] * pi).sum()/pj[j]
+            self.mean[j] = (data * pi[:,None]).sum(axis=0)/pj[j]
 
     def I(self, impute=0, sel_callback=None):
         # create imputation sample from the current model
