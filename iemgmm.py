@@ -68,14 +68,16 @@ class GMM:
 
 class IEMGMM(GMM):
     
-    def __init__(self, data, K=1, R=1, s=1., w=0., verbose=False, sel=None, sel_callback=None):
+    def __init__(self, data, K=1, R=1, s=None, w=0., verbose=False, sel=None, sel_callback=None):
         self.K = K
         self.D = data.shape[1]
         self.R = R
+        self.s = None
+        self.w = w
         self.verbose = verbose
-        self._fit(data, s=s, w=w, sel=sel, sel_callback=sel_callback)
+        self._fit(data, sel=sel, sel_callback=sel_callback)
                  
-    def _fit(self, data, s=1., w=0, sel=None, sel_callback=None):
+    def _fit(self, data, sel=None, sel_callback=None):
         amp_r = np.empty((self.R * self.K))
         mean_r = np.empty((self.R * self.K, self.D))
         covar_r = np.empty((self.R * self.K, self.D, self.D))
@@ -84,9 +86,9 @@ class IEMGMM(GMM):
             if self.verbose:
                 print "fitting model %d..." % r
             if sel is None:
-                self._run_EM(data, s=s, w=w)
+                self._run_EM(data)
             else:
-                self._run_EM(data, s=s, w=w, impute=(sel==False).sum(), sel_callback=sel_callback)
+                self._run_EM(data, impute=(sel==False).sum(), sel_callback=sel_callback)
 
             # save the current model likelihood
             self.ll[r] = self.logL(data).mean()
@@ -100,8 +102,8 @@ class IEMGMM(GMM):
         self.mean = mean_r
         self.covar = covar_r
         
-    def _run_EM(self, data, s=1., w=0, impute=0, sel_callback=None, tol=1e-3):
-        self.initializeModel(data, s)
+    def _run_EM(self, data, impute=0, sel_callback=None, tol=1e-3):
+        self.initializeModel(data)
         maxiter = 100
         
         # standard EM
@@ -116,7 +118,7 @@ class IEMGMM(GMM):
                     qij = self.E(data)
                     # compute logL from E before M modifies qij
                     logL_ = self.logsumLogL(qij.T).mean()
-                    self.M(data, qij, w=w)
+                    self.M(data, qij)
                     if self.verbose:
                         print " iter %d: %.3f" % (it, logL_)
 
@@ -139,7 +141,7 @@ class IEMGMM(GMM):
         # with imputation
         else:
             # run standard EM first, with larger tolerance
-            self._run_EM(data, s=s, w=w, tol=tol*10)
+            self._run_EM(data, tol=tol*10)
 
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
@@ -172,7 +174,7 @@ class IEMGMM(GMM):
                         # perform EM on extended data
                         qij = self.E(data_)
                         logL__[rd] = self.logsumLogL(qij.T).mean()
-                        self.M(data_, qij, w=w, impute=impute)
+                        self.M(data_, qij, impute=impute)
 
                         # save model
                         amp__[rd,:] = self.amp[:]
@@ -203,13 +205,22 @@ class IEMGMM(GMM):
                 self.covar = covar__.mean(axis=0)
                 it += 1
 
-    def initializeModel(self, data, s):
+    def initializeModel(self, data):
         # set model to random positions with equally sized spheres
         self.amp = np.ones(self.K)/self.K
         min_pos = data.min(axis=0)
         max_pos = data.max(axis=0)
         self.mean = min_pos + (max_pos-min_pos)*np.random.random(size=(self.K, self.D))
-        self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
+        # if s is not set: use volume filling argument:
+        # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
+        # should completely fill the volume spanned by data.
+        if self.s is None:
+            from scipy.special import gamma
+            vol_data = np.prod(max_pos-min_pos)
+            self.s = (vol_data * gamma(self.D/2 + 1))**(1./self.D) / np.sqrt(np.pi)
+            if self.verbose:
+                print "initializing spheres with s=%.2f" % self.s
+        self.covar = np.tile(self.s**2 * np.eye(self.D), (self.K,1,1))
 
     def logL(self, data):
         qij = self.E(data)
@@ -229,7 +240,7 @@ class IEMGMM(GMM):
             qij[:,j] = np.log(self.amp[j]) - log2piD2 - sign*logdet/2 - chi2/2
         return qij
 
-    def M(self, data, qij, w=0, impute=0):
+    def M(self, data, qij, impute=0):
         N = data.shape[0]
         
         # log of fractional probability
@@ -263,8 +274,8 @@ class IEMGMM(GMM):
             self.covar[j] += (pi[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             
             # Bayesian regularization term
-            if w > 0:
-                self.covar[j]+= w*np.eye(self.D)
+            if self.w > 0:
+                self.covar[j]+= self.w*np.eye(self.D)
                 self.covar[j] /= pj[j] + 1
             else:
                 self.covar[j] /= pj[j]
