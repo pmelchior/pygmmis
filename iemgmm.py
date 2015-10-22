@@ -39,6 +39,25 @@ class GMM:
                 samples = np.concatenate((samples[sel_], ssamples))
         return samples
 
+    def logL(self, data):
+        qij = self.E(data)
+        return self.logsumLogL(qij.T)
+
+    def E(self, data):
+        # use amp.size instead of self.K here because repeated fits will obtain
+        # probablities and logL from E, and they would otherwise only
+        # experience the first model
+        qij = np.empty((data.shape[0], self.amp.size))
+        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
+        for j in xrange(self.amp.size):
+            dx = data - self.mean[j]
+            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[j]), dx.T))
+            # prevent tiny negative determinants to mess up
+            (sign, logdet) = np.linalg.slogdet(self.covar[j])
+            qij[:,j] = np.log(self.amp[j]) - log2piD2 - sign*logdet/2 - chi2/2
+        return qij
+
+
     def logsumLogL(self, ll):
         """Computes log of sum of likelihoods for GMM components.
 
@@ -59,7 +78,6 @@ class GMM:
         overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
         c = np.where(underflow < overflow, underflow, overflow)
         return np.log(np.exp(ll + c).sum(axis=0)) - c
-
 
 
 class IEMGMM(GMM):
@@ -213,28 +231,10 @@ class IEMGMM(GMM):
         if self.s is None:
             from scipy.special import gamma
             vol_data = np.prod(max_pos-min_pos)
-            self.s = (vol_data * gamma(self.D/2 + 1))**(1./self.D) / np.sqrt(np.pi)
+            self.s = (vol_data / self.K * gamma(self.D*0.5 + 1))**(1./self.D) / np.sqrt(np.pi)
             if self.verbose:
                 print "initializing spheres with s=%.2f" % self.s
         self.covar = np.tile(self.s**2 * np.eye(self.D), (self.K,1,1))
-
-    def logL(self, data):
-        qij = self.E(data)
-        return self.logsumLogL(qij.T)
-
-    def E(self, data):
-        # use amp.size instead of self.K here because repeated fits will obtain
-        # probablities and logL from E, and they would otherwise only
-        # experience the first model
-        qij = np.empty((data.shape[0], self.amp.size))
-        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        for j in xrange(self.amp.size):
-            dx = data - self.mean[j]
-            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[j]), dx.T))
-            # prevent tiny negative determinants to mess up
-            (sign, logdet) = np.linalg.slogdet(self.covar[j])
-            qij[:,j] = np.log(self.amp[j]) - log2piD2 - sign*logdet/2 - chi2/2
-        return qij
 
     def M(self, data, qij, impute=0):
         N = data.shape[0]
