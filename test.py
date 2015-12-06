@@ -60,7 +60,7 @@ def getBoxWithHole(coords):
 
 def getHalfDensity(coords):
     mask = np.ones(coords.shape[0], dtype='bool')
-    mask[np.random.random(coords.shape[0]) < 0.5] = 0
+    mask[np.random.random(coords.shape[0]) < 0.9] = 0
     return mask
 
 def getTaperedDensity(coords):
@@ -109,7 +109,7 @@ sel = cb(orig)
 data = orig[sel]
 
 K = 3
-R = 100
+R = 10
 
 # without imputation
 gmm = IEMGMM(data, K=K, R=R, w=0.1)
@@ -120,7 +120,7 @@ gmm.weightWithLikelihood()
 plotResults(orig, sel, gmm, patch=ps)
 
 # with imputation
-gmm = IEMGMM(data, K=K, R=R, w=0.1, sel=sel, sel_callback=cb)
+gmm = IEMGMM(data, K=K, R=R, w=0.1, n_impute=(sel==False).sum(), sel_callback=cb)
 plotResults(orig, sel, gmm, patch=ps)
 
 gmm.weightWithLikelihood()

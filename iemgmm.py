@@ -40,23 +40,22 @@ class GMM:
         return samples
 
     def logL(self, data):
-        qij = self.E(data)
-        return self.logsumLogL(qij.T)
+        q = self.E(data)
+        return self.logsumLogL(q.T)
 
     def E(self, data):
         # use amp.size instead of self.K here because repeated fits will obtain
         # probablities and logL from E, and they would otherwise only
         # experience the first model
-        qij = np.empty((data.shape[0], self.amp.size))
+        q = np.empty((data.shape[0], self.amp.size))
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        for j in xrange(self.amp.size):
-            dx = data - self.mean[j]
-            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[j]), dx.T))
+        for k in xrange(self.amp.size):
+            dx = data - self.mean[k]
+            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
             # prevent tiny negative determinants to mess up
-            (sign, logdet) = np.linalg.slogdet(self.covar[j])
-            qij[:,j] = np.log(self.amp[j]) - log2piD2 - sign*logdet/2 - chi2/2
-        return qij
-
+            (sign, logdet) = np.linalg.slogdet(self.covar[k])
+            q[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+        return q
 
     def logsumLogL(self, ll):
         """Computes log of sum of likelihoods for GMM components.
@@ -82,16 +81,18 @@ class GMM:
 
 class IEMGMM(GMM):
     
-    def __init__(self, data, K=1, R=1, s=None, w=0., verbose=False, sel=None, sel_callback=None):
+    def __init__(self, data, K=1, R=1, s=None, w=0., verbose=False, n_impute=0, sel_callback=None):
+        # K: components, R: repeats, s: initial size, w: covariance minimum, verbose: output?
+        # n_impute: number of imputed points, sel_callback: function x -> probability of being observed
         self.K = K
         self.D = data.shape[1]
         self.R = R
         self.s = None
         self.w = w
         self.verbose = verbose
-        self._fit(data, sel=sel, sel_callback=sel_callback)
+        self._fit(data, n_impute=n_impute, sel_callback=sel_callback)
                  
-    def _fit(self, data, sel=None, sel_callback=None):
+    def _fit(self, data, n_impute=0, sel_callback=None):
         amp_r = np.empty((self.R * self.K))
         mean_r = np.empty((self.R * self.K, self.D))
         covar_r = np.empty((self.R * self.K, self.D, self.D))
@@ -99,10 +100,7 @@ class IEMGMM(GMM):
         for r in range(self.R):
             if self.verbose:
                 print "fitting model %d..." % r
-            if sel is None:
-                self._run_EM(data)
-            else:
-                self._run_EM(data, impute=(sel==False).sum(), sel_callback=sel_callback)
+            self._run_EM(data, n_impute=n_impute, sel_callback=sel_callback)
 
             # save the current model likelihood
             self.ll[r] = self.logL(data).mean()
@@ -116,12 +114,12 @@ class IEMGMM(GMM):
         self.mean = mean_r
         self.covar = covar_r
         
-    def _run_EM(self, data, impute=0, sel_callback=None, tol=1e-3):
+    def _run_EM(self, data, n_impute=0, sel_callback=None, tol=1e-3):
         self.initializeModel(data)
         maxiter = 100
         
         # standard EM
-        if impute == 0:
+        if n_impute == 0:
             it = 0
             logL0 = None
             while it < maxiter: # limit loop in case of no convergence
@@ -129,10 +127,10 @@ class IEMGMM(GMM):
                 mean_ = self.mean.copy()
                 covar_ = self.covar.copy()
                 try:
-                    qij = self.E(data)
+                    q = self.E(data)
                     # compute logL from E before M modifies qij
-                    logL_ = self.logsumLogL(qij.T).mean()
-                    self.M(data, qij)
+                    logL_ = self.logsumLogL(q.T).mean()
+                    self.M(data, q)
                     if self.verbose:
                         print " iter %d: %.3f" % (it, logL_)
 
@@ -182,13 +180,13 @@ class IEMGMM(GMM):
                     self.covar[:,:,:] = covar_[:,:,:]
                     
                     try:
-                        data_out = self.I(impute=impute, sel_callback=sel_callback)
+                        data_out = self.I(n_impute, sel_callback=sel_callback)
                         data_ = np.concatenate((data, data_out), axis=0)
 
                         # perform EM on extended data
-                        qij = self.E(data_)
-                        logL__[rd] = self.logsumLogL(qij.T).mean()
-                        self.M(data_, qij, impute=impute)
+                        q = self.E(data_)
+                        logL__[rd] = self.logsumLogL(q.T).mean()
+                        self.M(data_, q, n_impute=n_impute)
 
                         # save model
                         amp__[rd,:] = self.amp[:]
@@ -236,14 +234,14 @@ class IEMGMM(GMM):
                 print "initializing spheres with s=%.2f" % self.s
         self.covar = np.tile(self.s**2 * np.eye(self.D), (self.K,1,1))
 
-    def M(self, data, qij, impute=0):
+    def M(self, data, q, n_impute=0):
         N = data.shape[0]
         
         # log of fractional probability
-        qi = self.logsumLogL(qij.T)
+        qi = self.logsumLogL(q.T)
         for j in xrange(self.K):
-            qij[:,j] -= qi
-        qj = self.logsumLogL(qij)
+            q[:,j] -= qi
+        qj = self.logsumLogL(q)
         pj = np.exp(qj)
 
         # amplitude update
@@ -252,36 +250,36 @@ class IEMGMM(GMM):
         # covariance: with imputation we need add penalty term from
         # the conditional probability of drawing points from the model:
         # p_out / p * Sigma_j (i.e. fractional prob of imputed points)
-        if impute == 0:
+        if n_impute == 0:
             self.covar[:,:,:] = 0
         else:
-            pj_out = np.exp(self.logsumLogL(qij[-impute:]))
+            pj_out = np.exp(self.logsumLogL(q[-n_impute:]))
             self.covar *= (pj_out / pj)[:, None, None]
             
-        for j in xrange(self.K):
-            pi = np.exp(qij[:,j])
+        for k in xrange(self.K):
+            pi = np.exp(q[:,k])
 
             # mean
-            self.mean[j] = (data * pi[:,None]).sum(axis=0)/pj[j]
+            self.mean[k] = (data * pi[:,None]).sum(axis=0)/pj[k]
 
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
-            d_m = data - self.mean[j]
-            self.covar[j] += (pi[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+            d_m = data - self.mean[k]
+            self.covar[k] += (pi[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             
             # Bayesian regularization term
             if self.w > 0:
-                self.covar[j]+= self.w*np.eye(self.D)
-                self.covar[j] /= pj[j] + 1
+                self.covar[k]+= self.w*np.eye(self.D)
+                self.covar[k] /= pj[k] + 1
             else:
-                self.covar[j] /= pj[j]
+                self.covar[k] /= pj[k]
 
 
-    def I(self, impute=0, sel_callback=None):
+    def I(self, n_impute, sel_callback=None):
         # create imputation sample from the current model
         # we don know the number if missing values exactly, so
         # draw from a Poisson distribution
-        n_samples = np.random.poisson(impute)
+        n_samples = np.random.poisson(n_impute)
         return self.draw(size=n_samples, sel_callback=sel_callback, invert_callback=True)
 
     def weightWithLikelihood(self):
