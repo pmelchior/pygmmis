@@ -239,13 +239,13 @@ class IEMGMM(GMM):
         
         # log of fractional probability
         qi = self.logsumLogL(q.T)
-        for j in xrange(self.K):
-            q[:,j] -= qi
-        qj = self.logsumLogL(q)
-        pj = np.exp(qj)
+        for k in xrange(self.K):
+            q[:,k] -= qi
+        qk = self.logsumLogL(q)
+        pk = np.exp(qk)
 
         # amplitude update
-        self.amp = pj/N
+        self.amp = pk/N
         
         # covariance: with imputation we need add penalty term from
         # the conditional probability of drawing points from the model:
@@ -253,14 +253,14 @@ class IEMGMM(GMM):
         if n_impute == 0:
             self.covar[:,:,:] = 0
         else:
-            pj_out = np.exp(self.logsumLogL(q[-n_impute:]))
-            self.covar *= (pj_out / pj)[:, None, None]
+            pk_out = np.exp(self.logsumLogL(q[-n_impute:]))
+            self.covar *= (pk_out / pk)[:, None, None]
             
         for k in xrange(self.K):
             pi = np.exp(q[:,k])
 
             # mean
-            self.mean[k] = (data * pi[:,None]).sum(axis=0)/pj[k]
+            self.mean[k] = (data * pi[:,None]).sum(axis=0)/pk[k]
 
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
@@ -270,9 +270,9 @@ class IEMGMM(GMM):
             # Bayesian regularization term
             if self.w > 0:
                 self.covar[k]+= self.w*np.eye(self.D)
-                self.covar[k] /= pj[k] + 1
+                self.covar[k] /= pk[k] + 1
             else:
-                self.covar[k] /= pj[k]
+                self.covar[k] /= pk[k]
 
 
     def I(self, n_impute, sel_callback=None):
