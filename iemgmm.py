@@ -93,7 +93,7 @@ class IEMGMM(GMM):
         self.K = K
         self.D = data.shape[1]
         self.R = R
-        self.s = None
+        self.s = s
         self.w = w
         self.verbose = verbose
         self._fit(data, n_impute=n_impute, sel_callback=sel_callback)
