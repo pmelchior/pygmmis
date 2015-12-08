@@ -242,27 +242,31 @@ class IEMGMM(GMM):
 
     def M(self, data, log_p, n_impute=0):
         N = data.shape[0]
-        
-        # log of fractional probability logq, modifies log_p in place
+
+        # before we modify log_p, we need to store the fractional probability
+        # of imputed points (compared to all) for each component
+        if n_impute > 0:
+            frac_p_out =  np.exp(self.logsum(log_p[-n_impute:]) - self.logsum(log_p))
+            
+        # log of fractional probability log_q, modifies log_p in place
         log_q = log_p
         logsum_k_p = self.logsum(log_p.T) # summed over k, function of i
         for k in xrange(self.K):
             log_q[:,k] -= logsum_k_p
-        logsum_i_q = self.logsum(log_q)
-        sum_i_q = np.exp(logsum_i_q)
+        sum_i_q = np.exp(self.logsum(log_q))
 
         # amplitude update
         self.amp = sum_i_q/N
         
         # covariance: with imputation we need add penalty term from
         # the conditional probability of drawing points from the model:
-        # p_out / p * Sigma_j (i.e. fractional prob of imputed points)
+        # p_out / p * Sigma_k (i.e. fractional prob of imputed points)
         if n_impute == 0:
             self.covar[:,:,:] = 0
         else:
-            sum_i_q_out = np.exp(self.logsum(log_q[-n_impute:]))
-            self.covar *= (sum_i_q_out / sum_i_q)[:, None, None]
-            
+            self.covar *= frac_p_out[:, None, None]
+
+        # update all k component means and covariances
         for k in xrange(self.K):
             qk = np.exp(log_q[:,k])
 
