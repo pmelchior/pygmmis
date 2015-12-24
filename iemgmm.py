@@ -3,13 +3,18 @@
 import numpy as np
 
 class GMM:
-    def __init__(self, K=1, D=1):
+    def __init__(self, K=1, D=1, data=None, R=1, s=None, w=0., n_impute=0, sel_callback=None, verbose=False):
         self.K = K
-        self.D = D
-        self.amp = None
-        self.mean = None
-        self.covar = None
-        
+        self.verbose = verbose
+        if data is not None:
+            self.D = data.shape[1]
+            self._fit(data, R, s, w, n_impute=n_impute, sel_callback=sel_callback)
+        else:
+            self.D = D
+            self.amp = np.zeros((K))
+            self.mean = np.empty((K,D))
+            self.covar = np.empty((K,D,D))
+
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
         ind = np.random.choice(self.K, size=size, p=self.amp)
@@ -41,16 +46,15 @@ class GMM:
 
     def logL(self, data):
         log_p = self.E(data)
-        return self.logsum(log_p.T)
+        return self._logsum(log_p.T)
 
     def E(self, data):
         # compute p(x | k)
         # NOTE: normally the E step computes the fractional probability
         # p (x | k) / (sum_k p(x | k))
-        # We defer this to the M step because we need the proper probs for per-point
-        # likelihoods in some cases.
-
-        # Note2: we use amp.size instead of self.K here because for R > 1,
+        # We defer this to the M step because we need the proper probs
+        # for per-point likelihoods in some cases.
+        # NOTE2: we use amp.size instead of self.K here because for R > 1,
         # repeated fits will obtain probablities and logL from E,
         # and they would otherwise only experience the first model
         log_p = np.empty((data.shape[0], self.amp.size))
@@ -63,7 +67,7 @@ class GMM:
             log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
         return log_p
 
-    def logsum(self, ll):
+    def _logsum(self, ll):
         """Computes log of sum of likelihoods for GMM components.
 
         This method tries hard to avoid over- or underflow that may arise
@@ -84,21 +88,11 @@ class GMM:
         c = np.where(underflow < overflow, underflow, overflow)
         return np.log(np.exp(ll + c).sum(axis=0)) - c
 
-
-class IEMGMM(GMM):
-    
-    def __init__(self, data, K=1, R=1, s=None, w=0., verbose=False, n_impute=0, sel_callback=None):
-        # K: components, R: repeats, s: initial size, w: covariance minimum, verbose: output?
-        # n_impute: number of imputed points, sel_callback: function x -> probability of being observed
-        self.K = K
-        self.D = data.shape[1]
+    def _fit(self, data, R, s, w, n_impute=0, sel_callback=None):
         self.R = R
         self.s = s
         self.w = w
-        self.verbose = verbose
-        self._fit(data, n_impute=n_impute, sel_callback=sel_callback)
-                 
-    def _fit(self, data, n_impute=0, sel_callback=None):
+        
         amp_r = np.empty((self.R * self.K))
         mean_r = np.empty((self.R * self.K, self.D))
         covar_r = np.empty((self.R * self.K, self.D, self.D))
@@ -135,7 +129,7 @@ class IEMGMM(GMM):
                 try:
                     log_p = self.E(data)
                     # compute logL from E before M modifies qij
-                    logL_ = self.logsum(log_p.T).mean()
+                    logL_ = self._logsum(log_p.T).mean()
                     self.M(data, log_p)
                     if self.verbose:
                         print " iter %d: %.3f" % (it, logL_)
@@ -191,7 +185,7 @@ class IEMGMM(GMM):
 
                         # perform EM on extended data
                         log_p = self.E(data_)
-                        logL__[rd] = self.logsum(log_p.T).mean()
+                        logL__[rd] = self._logsum(log_p.T).mean()
                         self.M(data_, log_p, n_impute=n_impute)
 
                         # save model
@@ -246,17 +240,17 @@ class IEMGMM(GMM):
         # before we modify log_p, we need to store the fractional probability
         # of imputed points (compared to all) for each component
         if n_impute > 0:
-            frac_p_out =  np.exp(self.logsum(log_p[-n_impute:]) - self.logsum(log_p))
+            frac_p_out =  np.exp(self._logsum(log_p[-n_impute:]) - self._logsum(log_p))
             
         # log of fractional probability log_q, modifies log_p in place
         log_q = log_p
-        logsum_k_p = self.logsum(log_p.T) # summed over k, function of i
+        logsum_k_p = self._logsum(log_p.T) # summed over k, function of i
         for k in xrange(self.K):
             log_q[:,k] -= logsum_k_p
-        sum_i_q = np.exp(self.logsum(log_q))
+        sum_i_q = np.exp(self._logsum(log_q))
 
         # amplitude update
-        self.amp = sum_i_q/N
+        self.amp[:] = sum_i_q/N
         
         # covariance: with imputation we need add penalty term from
         # the conditional probability of drawing points from the model:
@@ -271,19 +265,19 @@ class IEMGMM(GMM):
             qk = np.exp(log_q[:,k])
 
             # mean
-            self.mean[k] = (data * qk[:,None]).sum(axis=0)/sum_i_q[k]
+            self.mean[k,:] = (data * qk[:,None]).sum(axis=0)/sum_i_q[k]
 
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
             d_m = data - self.mean[k]
-            self.covar[k] += (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+            self.covar[k,:,:] += (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             
             # Bayesian regularization term
             if self.w > 0:
-                self.covar[k]+= self.w*np.eye(self.D)
-                self.covar[k] /= sum_i_q[k] + 1
+                self.covar[k,:,:] += self.w*np.eye(self.D)
+                self.covar[k,:,:] /= sum_i_q[k] + 1
             else:
-                self.covar[k] /= sum_i_q[k]
+                self.covar[k,:,:] /= sum_i_q[k]
 
 
     def I(self, n_impute, sel_callback=None):
