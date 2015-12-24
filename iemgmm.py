@@ -3,17 +3,22 @@
 import numpy as np
 
 class GMM:
-    def __init__(self, K=1, D=1, data=None, R=1, s=None, w=0., n_impute=0, sel_callback=None, verbose=False):
-        self.K = K
+    def __init__(self, K=1, D=1, data=None, s=None, w=0., n_impute=0, sel_callback=None, verbose=False):
         self.verbose = verbose
         if data is not None:
             self.D = data.shape[1]
-            self._fit(data, R, s, w, n_impute=n_impute, sel_callback=sel_callback)
+            self.w = w
+            self.initializeModel(K, s, data)
+            self._run_EM(data, n_impute=n_impute, sel_callback=sel_callback)
         else:
             self.D = D
             self.amp = np.zeros((K))
             self.mean = np.empty((K,D))
             self.covar = np.empty((K,D,D))
+            
+    @property
+    def K(self):
+        return self.amp.size
 
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
@@ -45,77 +50,10 @@ class GMM:
         return samples
 
     def logL(self, data):
-        log_p = self.E(data)
+        log_p = self._E(data)
         return self._logsum(log_p.T)
 
-    def E(self, data):
-        # compute p(x | k)
-        # NOTE: normally the E step computes the fractional probability
-        # p (x | k) / (sum_k p(x | k))
-        # We defer this to the M step because we need the proper probs
-        # for per-point likelihoods in some cases.
-        # NOTE2: we use amp.size instead of self.K here because for R > 1,
-        # repeated fits will obtain probablities and logL from E,
-        # and they would otherwise only experience the first model
-        log_p = np.empty((data.shape[0], self.amp.size))
-        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        for k in xrange(self.amp.size):
-            dx = data - self.mean[k]
-            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
-            # prevent tiny negative determinants to mess up
-            (sign, logdet) = np.linalg.slogdet(self.covar[k])
-            log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
-        return log_p
-
-    def _logsum(self, ll):
-        """Computes log of sum of likelihoods for GMM components.
-
-        This method tries hard to avoid over- or underflow that may arise
-        when computing exp(log(p(x | k)).
-
-        See appendix A of Bovy, Hogg, Roweis (2009).
-
-        Args:
-        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
-
-        Returns:
-        (N, 1) of log of total likelihood
-
-        """
-        floatinfo = np.finfo(ll.dtype)
-        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
-        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
-        c = np.where(underflow < overflow, underflow, overflow)
-        return np.log(np.exp(ll + c).sum(axis=0)) - c
-
-    def _fit(self, data, R, s, w, n_impute=0, sel_callback=None):
-        self.R = R
-        self.s = s
-        self.w = w
-        
-        amp_r = np.empty((self.R * self.K))
-        mean_r = np.empty((self.R * self.K, self.D))
-        covar_r = np.empty((self.R * self.K, self.D, self.D))
-        self.ll = np.empty(self.R)
-        for r in range(self.R):
-            if self.verbose:
-                print "fitting model %d..." % r
-            self._run_EM(data, n_impute=n_impute, sel_callback=sel_callback)
-
-            # save the current model likelihood
-            self.ll[r] = self.logL(data).mean()
-
-            # store for mixture later
-            amp_r[r*self.K:(r+1)*self.K] = self.amp
-            mean_r[r*self.K:(r+1)*self.K] = self.mean
-            covar_r[r*self.K:(r+1)*self.K] = self.covar
-
-        self.amp = amp_r / amp_r.sum()
-        self.mean = mean_r
-        self.covar = covar_r
-        
     def _run_EM(self, data, n_impute=0, sel_callback=None, tol=1e-3):
-        self.initializeModel(data)
         maxiter = 100
         
         # standard EM
@@ -127,10 +65,10 @@ class GMM:
                 mean_ = self.mean.copy()
                 covar_ = self.covar.copy()
                 try:
-                    log_p = self.E(data)
+                    log_p = self._E(data)
                     # compute logL from E before M modifies qij
                     logL_ = self._logsum(log_p.T).mean()
-                    self.M(data, log_p)
+                    self._M(data, log_p)
                     if self.verbose:
                         print " iter %d: %.3f" % (it, logL_)
 
@@ -180,13 +118,13 @@ class GMM:
                     self.covar[:,:,:] = covar_[:,:,:]
                     
                     try:
-                        data_out = self.I(n_impute, sel_callback=sel_callback)
+                        data_out = self._I(n_impute, sel_callback=sel_callback)
                         data_ = np.concatenate((data, data_out), axis=0)
 
                         # perform EM on extended data
-                        log_p = self.E(data_)
+                        log_p = self._E(data_)
                         logL__[rd] = self._logsum(log_p.T).mean()
-                        self.M(data_, log_p, n_impute=n_impute)
+                        self._M(data_, log_p, n_impute=n_impute)
 
                         # save model
                         amp__[rd,:] = self.amp[:]
@@ -217,24 +155,62 @@ class GMM:
                 self.covar = covar__.mean(axis=0)
                 it += 1
 
-    def initializeModel(self, data):
+    def initializeModel(self, K, s, data):
         # set model to random positions with equally sized spheres
-        self.amp = np.ones(self.K)/self.K
+        self.amp = np.ones(K)/K # now self.K works
         min_pos = data.min(axis=0)
         max_pos = data.max(axis=0)
         self.mean = min_pos + (max_pos-min_pos)*np.random.random(size=(self.K, self.D))
         # if s is not set: use volume filling argument:
         # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
         # should completely fill the volume spanned by data.
-        if self.s is None:
+        if s is None:
             from scipy.special import gamma
             vol_data = np.prod(max_pos-min_pos)
-            self.s = (vol_data / self.K * gamma(self.D*0.5 + 1))**(1./self.D) / np.sqrt(np.pi)
+            s = (vol_data / self.K * gamma(self.D*0.5 + 1))**(1./self.D) / np.sqrt(np.pi)
             if self.verbose:
-                print "initializing spheres with s=%.2f" % self.s
-        self.covar = np.tile(self.s**2 * np.eye(self.D), (self.K,1,1))
+                print "initializing spheres with s=%.2f" % s
+        self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
 
-    def M(self, data, log_p, n_impute=0):
+    def _E(self, data):
+        # compute p(x | k)
+        # NOTE: normally the E step computes the fractional probability
+        # p (x | k) / (sum_k p(x | k))
+        # We defer this to the M step because we need the proper probs
+        # for per-point likelihoods in some cases.
+        log_p = np.empty((data.shape[0], self.K))
+        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
+        for k in xrange(self.K):
+            dx = data - self.mean[k]
+            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
+            # prevent tiny negative determinants to mess up
+            (sign, logdet) = np.linalg.slogdet(self.covar[k])
+            log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+        return log_p
+
+    def _logsum(self, ll):
+        """Computes log of sum of likelihoods for GMM components.
+
+        This method tries hard to avoid over- or underflow that may arise
+        when computing exp(log(p(x | k)).
+
+        See appendix A of Bovy, Hogg, Roweis (2009).
+
+        Args:
+        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
+
+        Returns:
+        (N, 1) of log of total likelihood
+
+        """
+        floatinfo = np.finfo(ll.dtype)
+        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
+        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
+        c = np.where(underflow < overflow, underflow, overflow)
+        return np.log(np.exp(ll + c).sum(axis=0)) - c
+
+
+    def _M(self, data, log_p, n_impute=0):
         N = data.shape[0]
 
         # before we modify log_p, we need to store the fractional probability
@@ -279,18 +255,13 @@ class GMM:
             else:
                 self.covar[k,:,:] /= sum_i_q[k]
 
-
-    def I(self, n_impute, sel_callback=None):
+    def _I(self, n_impute, sel_callback=None):
         # create imputation sample from the current model
         # we don know the number if missing values exactly, so
         # draw from a Poisson distribution
         n_samples = np.random.poisson(n_impute)
         return self.draw(size=n_samples, sel_callback=sel_callback, invert_callback=True)
 
-    def weightWithLikelihood(self):
-        # apply likelihood weighting to each model's amplitude
-        self.amp = (np.array(np.split(self.amp, self.R) * np.exp(self.ll)[:, None])).reshape(self.K * self.R)
-        self.amp /= self.amp.sum()
 
 
 

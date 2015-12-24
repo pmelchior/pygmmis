@@ -111,19 +111,39 @@ data = orig[sel]
 K = 3
 R = 10
 
-# without imputation
-no_imp = iemgmm.GMM(K=K, data=data, R=R, w=0.1, verbose=False)
+# 1) fit without imputation
+no_imp = iemgmm.GMM(K=K*R, D=D)
+ll = np.empty(R)
+for r in xrange(R):
+    no_imp_ = iemgmm.GMM(K=K, data=data, w=0.1, verbose=False)
+    ll[r] = no_imp_.logL(data).mean()
+    no_imp.amp[r*K:(r+1)*K] = no_imp_.amp
+    no_imp.mean[r*K:(r+1)*K,:] = no_imp_.mean
+    no_imp.covar[r*K:(r+1)*K,:,:] = no_imp_.covar
+no_imp.amp /= no_imp.amp.sum()
 plotResults(orig, sel, no_imp, patch=ps)
 
-# apply likelihood weighting to amplitudes
-no_imp.weightWithLikelihood()
+# weight resulting models with their respective likelihood
+for r in xrange(R):
+    no_imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+no_imp.amp /= no_imp.amp.sum()
 plotResults(orig, sel, no_imp, patch=ps)
 
-# with imputation
-imp = iemgmm.GMM(K=K, data=data, R=R, w=0.1, n_impute=(sel==False).sum(), sel_callback=cb)
+
+# 2) same with imputation
+imp = iemgmm.GMM(K=K*R, D=D)
+for r in xrange(R):
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_impute=(sel==False).sum(), sel_callback=cb, verbose=False)
+    ll[r] = imp_.logL(data).mean()
+    imp.amp[r*K:(r+1)*K] = imp_.amp
+    imp.mean[r*K:(r+1)*K,:] = imp_.mean
+    imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
 
-imp.weightWithLikelihood()
+for r in xrange(R):
+    imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
 
 
