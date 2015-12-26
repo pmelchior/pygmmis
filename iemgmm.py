@@ -78,9 +78,6 @@ class GMM:
                     else:
                         logL0 = logL_
                     it += 1
-                    amp_ = self.amp.copy()
-                    mean_ = self.mean.copy()
-                    covar_ = self.covar.copy()
                 except np.linalg.linalg.LinAlgError:
                     if self.verbose:
                         print "warning: ran into trouble, stopping fit at previous position"
