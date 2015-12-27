@@ -57,38 +57,29 @@ class GMM:
         maxiter = 100
         
         # standard EM
-        if n_impute == 0:
-            it = 0
-            logL0 = None
-            while it < maxiter: # limit loop in case of no convergence
-                amp_ = self.amp.copy()
-                mean_ = self.mean.copy()
-                covar_ = self.covar.copy()
-                try:
-                    log_p = self._E(data)
-                    # compute logL from E before M modifies qij
-                    logL_ = self._logsum(log_p.T).mean()
-                    self._M(data, log_p)
-                    if self.verbose:
-                        print " iter %d: %.3f" % (it, logL_)
+        it = 0
+        logL0 = None
+        while it < maxiter: # limit loop in case of no convergence
+            amp_ = self.amp.copy()
+            mean_ = self.mean.copy()
+            covar_ = self.covar.copy()
 
-                    # convergence test
-                    if it > 0 and logL_ - logL0 < tol:
-                        break
-                    else:
-                        logL0 = logL_
-                    it += 1
-                except np.linalg.linalg.LinAlgError:
-                    if self.verbose:
-                        print "warning: ran into trouble, stopping fit at previous position"
-                    self.amp = amp_
-                    self.mean = mean_
-                    self.covar = covar_
-                    break
-        # with imputation
-        else:
-            # run standard EM first, with larger tolerance
-            self._run_EM(data, tol=tol*10)
+            log_p = self._E(data)
+            # compute logL from E before M modifies qij
+            logL_ = self._logsum(log_p.T).mean()
+            self._M(data, log_p)
+            if self.verbose:
+                print " iter %d: %.3f" % (it, logL_)
+
+            # convergence test
+            if it > 0 and logL_ - logL0 < tol:
+                break
+            else:
+                logL0 = logL_
+            it += 1
+
+        # do we need imputation?
+        if n_impute > 0:
 
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
@@ -114,23 +105,20 @@ class GMM:
                     self.mean[:,:] = mean_[:,:]
                     self.covar[:,:,:] = covar_[:,:,:]
                     
-                    try:
-                        data_out = self._I(n_impute, sel_callback=sel_callback)
-                        data_ = np.concatenate((data, data_out), axis=0)
+                    data_out = self._I(n_impute, sel_callback=sel_callback)
+                    data_ = np.concatenate((data, data_out), axis=0)
 
-                        # perform EM on extended data
-                        log_p = self._E(data_)
-                        logL__[rd] = self._logsum(log_p.T).mean()
-                        self._M(data_, log_p, n_impute=n_impute)
+                    # perform EM on extended data
+                    log_p = self._E(data_)
+                    logL__[rd] = self._logsum(log_p.T).mean()
+                    self._M(data_, log_p, n_impute=n_impute)
 
-                        # save model
-                        amp__[rd,:] = self.amp[:]
-                        mean__[rd,:,:] = self.mean[:,:]
-                        covar__[rd,:,:,:] = self.covar[:,:,:]
-                        if self.verbose:
-                            print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
-                    except np.linalg.linalg.LinAlgError:
-                        rd -= 1
+                    # save model
+                    amp__[rd,:] = self.amp[:]
+                    mean__[rd,:,:] = self.mean[:,:]
+                    covar__[rd,:,:,:] = self.covar[:,:,:]
+                    if self.verbose:
+                        print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
                     rd += 1
                     
                 # convergence test:
