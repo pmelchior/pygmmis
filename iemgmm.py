@@ -213,7 +213,7 @@ class GMM:
         # before we modify log_p, we need to store the fractional probability
         # of imputed points (compared to all) for each component
         if n_impute > 0:
-            frac_p_out =  np.exp(self._logsum(log_p[-n_impute:]) - self._logsum(log_p))
+            frac_p_out = np.exp(self._logsum(log_p[-n_impute:]) - self._logsum(log_p))
             
         # log of fractional probability log_q, modifies log_p in place
         log_q = log_p

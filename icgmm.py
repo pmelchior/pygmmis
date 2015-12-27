@@ -11,7 +11,6 @@ class ICGMM(GMM):
             self.D = data.shape[1]
             self.w = w
             self.initializeModel(K, s, data)     # will need randoms if non-uniform
-            self.sel = [None for k in xrange(K)] # selection of points per component
             self._run_EM(data, cutoff=cutoff, n_impute=n_impute, sel_callback=sel_callback)
         else:
             self.D = D
@@ -29,7 +28,7 @@ class ICGMM(GMM):
         S = np.zeros(len(data)) # S = sum_k p(x|k)
         log_S = np.empty(len(data))
         A = np.zeros(len(data), dtype='bool') # A == 1 for points in the fit
-
+        sel = [None for k in xrange(self.K)]
         # standard EM
         if n_impute == 0:
             it = 0
@@ -43,18 +42,17 @@ class ICGMM(GMM):
                     # only need S = sum_k p(i | k) for further calculation
                     log_p = []
                     for k in xrange(self.K):
-                        log_p.append(self._E(data, k, cutoff=cutoff))
-                        S[self.sel[k]] += np.exp(log_p[k])
-                        A[self.sel[k]] = 1
+                        log_p.append(self._E(data, k, sel, cutoff=cutoff))
+                        S[sel[k]] += np.exp(log_p[k])
+                        A[sel[k]] = 1
                         if self.verbose:
-                            print "  k = %d: |I| = %d <S> = %.3f" % (k, self.sel[k].size, np.log(S[self.sel[k]]).mean())
+                            print "  k = %d: |I| = %d <S> = %.3f" % (k, sel[k].size, np.log(S[sel[k]]).mean())
 
-                    # FIXME: this will throw an error of points are outside
-                    # of any selection, but it causes no other problems
+                    # since log(0) isn't a good idea, need to restrict to A
                     log_S[A] = np.log(S[A])
                     logL_ = log_S[A].mean()
                     for k in xrange(self.K):
-                        self._M(data, k, log_p[k], log_S, A.sum())
+                        self._M(data, k, log_p[k], log_S[sel[k]], sel[k], A.sum())
                         
                     if self.verbose:
                         print " iter %d: <S> = %.3f\t|A| = %d" % (it, logL_, A.sum())
@@ -76,55 +74,53 @@ class ICGMM(GMM):
                     self.covar = covar_
                     break
                 
-    def logL(self, data):
+    def logL(self, data, cutoff=None):
         S = np.zeros(len(data))
-        log_p = []
+        sel = [None for k in xrange(self.K)]
         for k in xrange(self.K):
-            log_p.append(self._E(data, k))
-            S += np.exp(log_p[k])
+            # to minimize the components with tiny p(x|k) in sum:
+            # only use those within cutoff
+            sel_k = None
+            log_p_k = self._E(data, k, sel, cutoff=cutoff)
+            S[sel[k]] += np.exp(log_p_k)
         return np.log(S)
 
-    def _E(self, data, k, cutoff=None, return_index=False):
+    def _E(self, data, k, sel, cutoff=None):
         # p(x | k) for all x in the vicinity of k
         # determine all points within cutoff sigma from mean[k]
-        if cutoff is None or self.sel[k] is None:
+        if cutoff is None or sel[k] is None:
             dx = data - self.mean[k]
         else:
-            dx = data[self.sel[k]] - self.mean[k]
+            dx = data[sel[k]] - self.mean[k]
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
         # close to convergence, we can stop applying the cutoff because
         # changes to sel will be minimal
         if cutoff is not None:
-            indices = np.flatnonzero(chi2 < cutoff**2*self.D)
+            indices = np.flatnonzero(chi2 < cutoff*cutoff*self.D)
             chi2 = chi2[indices]
-            if self.sel[k] is None:
-                self.sel[k] = indices
+            if sel[k] is None:
+                sel[k] = indices
             else:
-                self.sel[k] = self.sel[k][indices]
+                sel[k] = sel[k][indices]
         
         # prevent tiny negative determinants to mess up
         (sign, logdet) = np.linalg.slogdet(self.covar[k])
 
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        log_p = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
-        if return_index:
-            return log_p, self.sel[k]
-        else:
-            return log_p
-
-    def _M(self, data, k, log_q_k, log_S, all_points):
-        log_q_k -= log_S[self.sel[k]]
+    def _M(self, data, k, log_q_k, log_S_k, sel_k, all_points):
+        log_q_k -= log_S_k
         sum_i_q_k = np.exp(self._logsum(log_q_k))
         self.amp[k] = sum_i_q_k/all_points
 
         qk = np.exp(log_q_k)
         # mean
-        self.mean[k] = (data[self.sel[k]] * qk[:,None]).sum(axis=0)/sum_i_q_k
+        self.mean[k] = (data[sel_k] * qk[:,None]).sum(axis=0)/sum_i_q_k
 
         # funny way of saying: for each point i, do the outer product
         # of d_m with its transpose, multiply with pi[i], and sum over i
-        d_m = data[self.sel[k]] - self.mean[k]
+        d_m = data[sel_k] - self.mean[k]
         self.covar[k] = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             
         # Bayesian regularization term
