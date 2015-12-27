@@ -9,7 +9,6 @@ class ICGMM(GMM):
         self.verbose = verbose
         if data is not None:
             self.D = data.shape[1]
-            self.N = data.shape[0]
             self.w = w
             self.initializeModel(K, s, data)     # will need randoms if non-uniform
             self.sel = [None for k in xrange(K)] # selection of points per component
@@ -25,7 +24,12 @@ class ICGMM(GMM):
         maxiter = 100
 
         # sum_k p(x|k) -> S
-        S = np.ones(len(data)) # 1 is value for unset: masked in logsum
+        # extra precautions for cases when some points are treated as outliers
+        # and not considered as belonging to any component
+        S = np.zeros(len(data)) # S = sum_k p(x|k)
+        log_S = np.empty(len(data))
+        A = np.zeros(len(data), dtype='bool') # A == 1 for points in the fit
+
         # standard EM
         if n_impute == 0:
             it = 0
@@ -40,20 +44,20 @@ class ICGMM(GMM):
                     log_p = []
                     for k in xrange(self.K):
                         log_p.append(self._E(data, k, cutoff=cutoff))
-                        
-                        if cutoff is None:
-                            S = self._logsum(S, log_p[k])
-                        else:
-                            S[self.sel[k]] = self._logsum(S[self.sel[k]], log_p[k])
-                        
+                        S[self.sel[k]] += np.exp(log_p[k])
+                        A[self.sel[k]] = 1
                         if self.verbose:
-                            print "  k = %d: |I| = %d <S> = %.3f" % (k, self.sel[k].size, S.mean())
-                    logL_ = S.mean()
+                            print "  k = %d: |I| = %d <S> = %.3f" % (k, self.sel[k].size, np.log(S[self.sel[k]]).mean())
+
+                    # FIXME: this will throw an error of points are outside
+                    # of any selection, but it causes no other problems
+                    log_S[A] = np.log(S[A])
+                    logL_ = log_S[A].mean()
                     for k in xrange(self.K):
-                        self._M(data, k, log_p[k], S)
+                        self._M(data, k, log_p[k], log_S, A.sum())
                         
                     if self.verbose:
-                        print " iter %d: %.3f %.4f" % (it, logL_, self.amp.sum())
+                        print " iter %d: <S> = %.3f\t|A| = %d" % (it, logL_, A.sum())
                     # convergence test
                     if it > 0 and logL_ - logL0 < tol:
                         break
@@ -61,7 +65,8 @@ class ICGMM(GMM):
                         logL0 = logL_
 
                     it += 1
-                    S[:] = 1
+                    S[:] = 0
+                    A[:] = 0
                 
                 except np.linalg.linalg.LinAlgError:
                     if self.verbose:
@@ -72,15 +77,12 @@ class ICGMM(GMM):
                     break
                 
     def logL(self, data):
-        S = np.empty(len(data))
+        S = np.zeros(len(data))
         log_p = []
         for k in xrange(self.K):
             log_p.append(self._E(data, k))
-            if k == 0:
-                S = log_p[k]
-            else:
-                S = self._logsum(S, log_p[k])
-        return S
+            S += np.exp(log_p[k])
+        return np.log(S)
 
     def _E(self, data, k, cutoff=None, return_index=False):
         # p(x | k) for all x in the vicinity of k
@@ -111,10 +113,10 @@ class ICGMM(GMM):
         else:
             return log_p
 
-    def _M(self, data, k, log_q_k, S):
-        log_q_k -= S[self.sel[k]]
+    def _M(self, data, k, log_q_k, log_S, all_points):
+        log_q_k -= log_S[self.sel[k]]
         sum_i_q_k = np.exp(self._logsum(log_q_k))
-        self.amp[k] = sum_i_q_k/self.N
+        self.amp[k] = sum_i_q_k/all_points
 
         qk = np.exp(log_q_k)
         # mean
@@ -131,9 +133,9 @@ class ICGMM(GMM):
             self.covar[k] /= sum_i_q_k + 1
         else:
             self.covar[k] /= sum_i_q_k
-            
-    def _logsum(self, l, l2=None):
-        """Computes log of sum, given the log of the elements.
+
+    def _logsum(self, l):
+        """Computes log of a sum, given the log of the elements.
 
         This method tries hard to avoid over- or underflow that may arise
         when computing exp(ll).
@@ -142,27 +144,15 @@ class ICGMM(GMM):
 
         Args:
             l:  (N,1) log of whatever
-            l2: (N,1) another log of whatever (optional)
-
-        Returns:
-            if l2 is None: log(sum_i(l_i))
-            else: (N,1) log(l_i + l2_i)
 
         """
         floatinfo = np.finfo(l.dtype)
-        if l2 is None:
-            underflow = np.log(floatinfo.tiny) - l.min()
-            overflow = np.log(floatinfo.max) - l[l<1].max() - np.log((l<1).sum())
-            if underflow < overflow:
-                c = underflow
-            else:
-                c = overflow
-            return np.log(np.exp(l + c).sum()) - c
+        underflow = np.log(floatinfo.tiny) - l.min()
+        overflow = np.log(floatinfo.max) - l.max() - np.log(l.size)
+        if underflow < overflow:
+            c = underflow
         else:
-            # logsum of two log arrays
-            ls = np.log(np.exp(l) + np.exp(l2))
-            # for all elements with l==1: use value from l2
-            mask = (l == 1)
-            if mask.any():
-                ls[mask] = l2[mask]
-            return ls
+            c = overflow
+        return np.log(np.exp(l + c).sum()) - c
+
+
