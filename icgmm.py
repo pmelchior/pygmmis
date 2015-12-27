@@ -29,6 +29,7 @@ class ICGMM(GMM):
         log_S = np.empty(len(data))
         A = np.zeros(len(data), dtype='bool') # A == 1 for points in the fit
         sel = [None for k in xrange(self.K)]
+        log_p = [[] for k in xrange(self.K)]
         # standard EM
         if n_impute == 0:
             it = 0
@@ -40,19 +41,18 @@ class ICGMM(GMM):
                 try:
                     # compute p(i | k) for each k independently
                     # only need S = sum_k p(i | k) for further calculation
-                    log_p = []
                     for k in xrange(self.K):
-                        log_p.append(self._E(data, k, sel, cutoff=cutoff))
+                        log_p[k] = self._E(data, k, sel, cutoff=cutoff)
                         S[sel[k]] += np.exp(log_p[k])
                         A[sel[k]] = 1
                         if self.verbose:
-                            print "  k = %d: |I| = %d <S> = %.3f" % (k, sel[k].size, np.log(S[sel[k]]).mean())
+                            print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
 
                     # since log(0) isn't a good idea, need to restrict to A
                     log_S[A] = np.log(S[A])
                     logL_ = log_S[A].mean()
                     for k in xrange(self.K):
-                        self._M(data, k, log_p[k], log_S[sel[k]], sel[k], A.sum())
+                        self._M(data, k, log_p[k], log_S, sel[k], A.sum())
                         
                     if self.verbose:
                         print " iter %d: <S> = %.3f\t|A| = %d" % (it, logL_, A.sum())
@@ -80,7 +80,6 @@ class ICGMM(GMM):
         for k in xrange(self.K):
             # to minimize the components with tiny p(x|k) in sum:
             # only use those within cutoff
-            sel_k = None
             log_p_k = self._E(data, k, sel, cutoff=cutoff)
             S[sel[k]] += np.exp(log_p_k)
         return np.log(S)
@@ -109,18 +108,21 @@ class ICGMM(GMM):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
-    def _M(self, data, k, log_q_k, log_S_k, sel_k, all_points):
-        log_q_k -= log_S_k
+    def _M(self, data, k, log_q_k, log_S, sel_k, all_points):
+        # reshape needed when sel_k is None because of its implicit meaning
+        # as np.newaxis (which would create a 2D array)
+        log_q_k -= log_S[sel_k].reshape(log_q_k.size)
         sum_i_q_k = np.exp(self._logsum(log_q_k))
         self.amp[k] = sum_i_q_k/all_points
 
         qk = np.exp(log_q_k)
         # mean
-        self.mean[k] = (data[sel_k] * qk[:,None]).sum(axis=0)/sum_i_q_k
+        d = data[sel_k].reshape((log_q_k.size, self.D))
+        self.mean[k] = (d * qk[:,None]).sum(axis=0)/sum_i_q_k
 
         # funny way of saying: for each point i, do the outer product
         # of d_m with its transpose, multiply with pi[i], and sum over i
-        d_m = data[sel_k] - self.mean[k]
+        d_m = d - self.mean[k]
         self.covar[k] = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             
         # Bayesian regularization term

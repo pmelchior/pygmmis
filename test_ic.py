@@ -91,8 +91,11 @@ K = 3
 gmm = iemgmm.GMM(K=K, data=data, w=0.1, verbose=True)
 plotResults(data, None, gmm)
 
-new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=5, w=0.1, verbose=True)
-plotResults(data, None, new_gmm)
+gmm_ic = icgmm.ICGMM(K=K, data=data, cutoff=None, w=0.1, verbose=True)
+plotResults(data, None, gmm_ic)
+
+gmm_ic3 = icgmm.ICGMM(K=K, data=data, cutoff=3, w=0.1, verbose=True)
+plotResults(data, None, gmm_ic3)
 
 
 
