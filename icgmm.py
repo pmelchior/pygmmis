@@ -199,32 +199,44 @@ class ICGMM(GMM):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
-    def _M(self, k, data, log_q_k, log_S, sel_k, all_points):
+    def _M(self, k, data, log_p_k, log_S, sel_k, n_points, n_impute=0):
+
+        # maybe needed for later _M2 calls: P_k = sum_i p_ik
+        if n_impute > 0:
+            P_k = np.exp(self._logsum(log_q_k))
+        else:
+            P_k = None
+            
         # reshape needed when sel_k is None because of its implicit meaning
         # as np.newaxis (which would create a 2D array)
-        log_q_k -= log_S[sel_k].reshape(log_q_k.size)
-        sum_i_q_k = np.exp(self._logsum(log_q_k))
-        self.amp[k] = sum_i_q_k/all_points
+        # NOTE: this modifies log_q_k in place!
+        log_p_k -= log_S[sel_k].reshape(log_p_k.size)
 
-        qk = np.exp(log_q_k)
-        # mean
-        d = data[sel_k].reshape((log_q_k.size, self.D))
-        self.mean[k,:] = (d * qk[:,None]).sum(axis=0)/sum_i_q_k
+        # amplitude: A_k = sum_i q_ik
+        A_k = np.exp(self._logsum(log_p_k))
+        self.amp[k] = A_k/n_points
 
+        # mean: M_k = sum_i x_i q_ik
+        qk = np.exp(log_p_k)
+        d = data[sel_k].reshape((log_p_k.size, self.D))
+        M_k = (d * qk[:,None]).sum(axis=0)
+        self.mean[k,:] = M_k/A_k
+
+        # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
+        d_m = d - self.mean[k]
         # funny way of saying: for each point i, do the outer product
         # of d_m with its transpose, multiply with pi[i], and sum over i
-        d_m = d - self.mean[k]
-        self.covar[k,:,:] = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
-            
+        C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
         # Bayesian regularization term
         if self.w > 0:
-            self.covar[k,:,:] += self.w*np.eye(self.D)
-            self.covar[k,:,:] /= sum_i_q_k + 1
+            self.covar[k,:,:] = (C_k + self.w*np.eye(self.D)) / (A_k + 1)
         else:
-            self.covar[k,:,:] /= sum_i_q_k
+            self.covar[k,:,:] /= C_k/A_k
 
+        return A_k, M_k, C_k, P_k
+        
 
-    def _M2(self, k, data, data2, log_q_k, log_q2_k, log_S, log_S2, sel_k, sel2_k, all_points):
+    def _M2(self, k, data, data2, log_q_k, log_q2_k, log_S, log_S2, sel_k, sel2_k, n_points):
         # before we modify log_p, we need to store the fractional probability
         # of imputed points (compared to all) for each component
         frac_p_k_out = np.exp(self._logsum(log_q2_k))
@@ -236,7 +248,7 @@ class ICGMM(GMM):
         log_q2_k -= log_S2[sel2_k].reshape(log_q2_k.size)
         sum_i_q_k = np.exp(self._logsum(log_q_k)) + np.exp(self._logsum(log_q2_k))
         # amplitude
-        self.amp[k] = sum_i_q_k/all_points
+        self.amp[k] = sum_i_q_k/n_points
 
         # mean
         qk = np.exp(log_q_k)
