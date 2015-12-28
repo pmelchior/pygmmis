@@ -223,14 +223,14 @@ class GMM:
 
         # update all k component means and covariances
         for k in xrange(self.K):
-            qk = np.exp(log_q[:,k])
-
             # mean
+            qk = np.exp(log_q[:,k])
             self.mean[k,:] = (data * qk[:,None]).sum(axis=0)/sum_i_q[k]
 
+            # covariance
+            d_m = data - self.mean[k]
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
-            d_m = data - self.mean[k]
             self.covar[k,:,:] += (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
             
             # Bayesian regularization term

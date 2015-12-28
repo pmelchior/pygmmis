@@ -82,20 +82,62 @@ gmm.covar[:,:,:] = np.array([[[ 0.08530014, -0.00314178],
                               [0.0125736,  0.01075791]],
                              [[ 0.00258605,  0.00409287],
                              [ 0.00409287,  0.01065186]]])*100
-data = gmm.draw(N)
+orig = gmm.draw(N)
 
 
 
-K = 3
+K = 6
+R = 10
 
-gmm = iemgmm.GMM(K=K, data=data, w=0.1, verbose=True)
-plotResults(data, None, gmm)
+# limit data to within the box
+cb = getBoxWithHole
+ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
+      patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
 
-gmm_ic = icgmm.ICGMM(K=K, data=data, cutoff=None, w=0.1, verbose=True)
-plotResults(data, None, gmm_ic)
+sel = cb(orig)
+data = orig[sel]
 
-gmm_ic3 = icgmm.ICGMM(K=K, data=data, cutoff=3, w=0.1, verbose=True)
-plotResults(data, None, gmm_ic3)
+# 1) GMM with imputation
+imp = iemgmm.GMM(K=K*R, D=D)
+ll = np.empty(R)
+import datetime
+
+start = datetime.datetime.now()
+for r in xrange(R):
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_impute=(sel==False).sum(), sel_callback=cb, verbose=False)
+    ll[r] = imp_.logL(data).mean()
+    imp.amp[r*K:(r+1)*K] = imp_.amp
+    imp.mean[r*K:(r+1)*K,:] = imp_.mean
+    imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+imp.amp /= imp.amp.sum()
+print "execution time %ds" % (datetime.datetime.now() - start).seconds
+plotResults(orig, sel, imp, patch=ps)
+
+for r in xrange(R):
+    imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+imp.amp /= imp.amp.sum()
+plotResults(orig, sel, imp, patch=ps)
+
+
+# 1) ICGMM with imputation
+start = datetime.datetime.now()
+for r in xrange(R):
+    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, n_impute=(sel==False).sum(), sel_callback=cb, verbose=False)
+    ll[r] = imp_.logL(data).mean()
+    imp.amp[r*K:(r+1)*K] = imp_.amp
+    imp.mean[r*K:(r+1)*K,:] = imp_.mean
+    imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+imp.amp /= imp.amp.sum()
+print "execution time %ds" % (datetime.datetime.now() - start).seconds
+plotResults(orig, sel, imp, patch=ps)
+
+for r in xrange(R):
+    imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+imp.amp /= imp.amp.sum()
+plotResults(orig, sel, imp, patch=ps)
+
+
+
 
 
 
