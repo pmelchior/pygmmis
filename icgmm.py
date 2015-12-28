@@ -27,7 +27,7 @@ class ICGMM(GMM):
         # and not considered as belonging to any component
         S = np.zeros(len(data)) # S = sum_k p(x|k)
         log_S = np.empty(len(data))
-        A = np.zeros(len(data), dtype='bool') # A == 1 for points in the fit
+        N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
         sel = [None for k in xrange(self.K)]
         log_p = [[] for k in xrange(self.K)]
         
@@ -40,36 +40,38 @@ class ICGMM(GMM):
             covar_ = self.covar.copy()
             # compute p(i | k) for each k independently
             # only need S = sum_k p(i | k) for further calculation
+            if it > 0:
+                S[:] = 0
+                N[:] = 0
             for k in xrange(self.K):
                 log_p[k] = self._E(k, data, sel, cutoff=cutoff)
                 S[sel[k]] += np.exp(log_p[k])
-                A[sel[k]] = 1
+                N[sel[k]] = 1
                 if self.verbose:
                     print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
 
-            # since log(0) isn't a good idea, need to restrict to A
-            log_S[A] = np.log(S[A])
-            logL_ = log_S[A].mean()
+            # since log(0) isn't a good idea, need to restrict to N
+            log_S[N] = np.log(S[N])
+            logL_ = log_S[N].mean()
             for k in xrange(self.K):
-                self._M(k, data, log_p[k], log_S, sel[k], A.sum())
+                self._M(k, data, log_p[k], log_S, sel[k], N.sum())
 
             if self.verbose:
-                print " iter %d: <S> = %.3f\t|A| = %d" % (it, logL_, A.sum())
-            # convergence test
+                print " iter %d: <S> = %.3f\t|N| = %d" % (it, logL_, N.sum())
+                
+            # convergence test:
             if it > 0 and logL_ - logL0 < tol:
                 break
             else:
                 logL0 = logL_
 
             it += 1
-            S[:] = 0
-            A[:] = 0
             
         # do we need imputation?
         if n_impute > 0:
 
             if self.verbose:
-                print " starting imputation with ~%d extra points" % n_impute 
+                print "starting imputation with ~%d extra points" % n_impute 
             
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
@@ -81,33 +83,36 @@ class ICGMM(GMM):
             amp__ = np.empty((RD, self.K))
             mean__ = np.empty((RD, self.K, self.D))
             covar__ = np.empty((RD, self.K, self.D, self.D))
+
+            # save the M results from the non-imputed data
+            A = np.empty(self.K)
+            M = np.empty((self.K, self.D))
+            C = np.empty((self.K, self.D, self.D))
+            P = np.empty(self.K)
             
             while it < maxiter:
+
+                # save existing params to be used for each imputation run
                 amp_ = self.amp.copy()
                 mean_ = self.mean.copy()
                 covar_ = self.covar.copy()
 
-                # run E step on data first as above
-                if it == 0:
-                    # need to undo what previous run of M did
-                    for k in xrange(self.K):
-                        log_p[k] += log_S[sel[k]].reshape(log_p[k].size)
-                else:
-                    for k in xrange(self.K):
-                        log_p[k] = self._E(k, data, sel, cutoff=cutoff)
-                        S[sel[k]] += np.exp(log_p[k])
-                        A[sel[k]] = 1
-                        if self.verbose:
-                            print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
-                    log_S[A] = np.log(S[A])
+                # run E on data first as above, and store intermediate sums
+                # of M step for re-use during each imputation run
+                S[:] = 0
+                N[:] = 0
+                for k in xrange(self.K):
+                    log_p[k] = self._E(k, data, sel, cutoff=cutoff)
+                    S[sel[k]] += np.exp(log_p[k])
+                    N[sel[k]] = 1
+                    if self.verbose:
+                        print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
+                log_S[N] = np.log(S[N])
+                for k in xrange(self.K):
+                    A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k], n_impute=n_impute)
                 
                 rd = 0
                 while rd < RD:
-                    
-                    # reset model to current
-                    self.amp[:] = amp_[:]
-                    self.mean[:,:] = mean_[:,:]
-                    self.covar[:,:,:] = covar_[:,:,:]
                     
                     # create imputated data
                     data2 = self._I(n_impute, sel_callback=sel_callback)
@@ -128,9 +133,9 @@ class ICGMM(GMM):
                             print "  k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
 
                     log_S2 = np.log(S2)
-                    logL__[rd] = np.concatenate((log_S, log_S2)).mean()
+                    logL__[rd] = np.concatenate((log_S[N], log_S2)).mean()
                     for k in xrange(self.K):
-                        self._M2(k, data, data2, log_p[k], log_p2[k], log_S, log_S2, sel[k], sel2[k], A.sum() + len(data2))
+                        self._M2(k, data2, log_p2[k], log_S2, sel2[k], A[k], M[k], C[k], P[k], N.sum())
 
                     # save model
                     amp__[rd,:] = self.amp[:]
@@ -138,9 +143,14 @@ class ICGMM(GMM):
                     covar__[rd,:,:,:] = self.covar[:,:,:]
                     
                     if self.verbose:
-                        print "   iter %d/%d: %.3f\t|A| = %d" % (it, rd, logL__[rd], A.sum() + n_impute)
+                        print "   iter %d/%d: %.3f\t|N| = %d" % (it, rd, logL__[rd], N.sum() + len(data2))
 
+                    # reset model to current and repeat
                     rd += 1
+                    if rd < RD:
+                        self.amp[:] = amp_[:]
+                        self.mean[:,:] = mean_[:,:]
+                        self.covar[:,:,:] = covar_[:,:,:]
                     
                 # convergence test:
                 # in principle one can do Welch's t-test wrt iteration before
@@ -161,8 +171,6 @@ class ICGMM(GMM):
                 self.covar = covar__.mean(axis=0)
                 
                 it += 1
-                S[:] = 0
-                A[:] = 0
 
 
     def logL(self, data, cutoff=None):
@@ -201,9 +209,49 @@ class ICGMM(GMM):
 
     def _M(self, k, data, log_p_k, log_S, sel_k, n_points, n_impute=0):
 
+        # get the relevant sums
+        A_k, M_k, C_k, P_k = self._computeMSums(k, data, log_p_k, log_S, sel_k, n_impute=n_impute)
+        
+        # amplitude: A_k = sum_i q_ik
+        self.amp[k] = A_k/n_points
+
+        # mean: M_k = sum_i x_i q_ik
+        self.mean[k,:] = M_k/A_k
+
+        # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
+        # w/o Bayesian regularization term
+        if self.w > 0:
+            self.covar[k,:,:] = (C_k + self.w*np.eye(self.D)) / (A_k + 1)
+        else:
+            self.covar[k,:,:] /= C_k/A_k
+
+    def _M2(self, k, data2, log_p2_k, log_S2, sel2_k, A_k, M_k, C_k, P_k, n_points):
+        # get the relevant sums from data2
+        n_points2 = len(data2)
+        A2_k, M2_k, C2_k, P2_k = self._computeMSums(k, data2, log_p2_k, log_S2, sel2_k, n_impute=True)
+
+        # this is now the sum_i q_ik for i in [data, data2]
+        sum_i_q_k = A_k + A2_k
+        
+        # amplitude
+        self.amp[k] = sum_i_q_k/(n_points + n_points2)
+        
+        # mean
+        self.mean[k,:] = (M_k + M2_k)/sum_i_q_k
+        
+        # covariance
+        # imputation correction
+        frac_p_k_out = P2_k / (P_k + P2_k)
+        # Bayesian regularization term
+        if self.w > 0:
+            self.covar[k,:,:] = (C_k + C2_k + self.covar[k] * frac_p_k_out + self.w*np.eye(self.D)) / (sum_i_q_k + 1)
+        else:
+            self.covar[k,:,:] = (C_k + C2_k + self.covar[k] * frac_p_k_out) / sum_i_q_k
+
+    def _computeMSums(self, k, data, log_p_k, log_S, sel_k, n_impute=0):
         # maybe needed for later _M2 calls: P_k = sum_i p_ik
         if n_impute > 0:
-            P_k = np.exp(self._logsum(log_q_k))
+            P_k = np.exp(self._logsum(log_p_k))
         else:
             P_k = None
             
@@ -214,71 +262,19 @@ class ICGMM(GMM):
 
         # amplitude: A_k = sum_i q_ik
         A_k = np.exp(self._logsum(log_p_k))
-        self.amp[k] = A_k/n_points
 
         # mean: M_k = sum_i x_i q_ik
         qk = np.exp(log_p_k)
         d = data[sel_k].reshape((log_p_k.size, self.D))
         M_k = (d * qk[:,None]).sum(axis=0)
-        self.mean[k,:] = M_k/A_k
 
         # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
         d_m = d - self.mean[k]
         # funny way of saying: for each point i, do the outer product
         # of d_m with its transpose, multiply with pi[i], and sum over i
         C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
-        # Bayesian regularization term
-        if self.w > 0:
-            self.covar[k,:,:] = (C_k + self.w*np.eye(self.D)) / (A_k + 1)
-        else:
-            self.covar[k,:,:] /= C_k/A_k
-
         return A_k, M_k, C_k, P_k
         
-
-    def _M2(self, k, data, data2, log_q_k, log_q2_k, log_S, log_S2, sel_k, sel2_k, n_points):
-        # before we modify log_p, we need to store the fractional probability
-        # of imputed points (compared to all) for each component
-        frac_p_k_out = np.exp(self._logsum(log_q2_k))
-        frac_p_k_out /= np.exp(self._logsum(log_q_k)) + frac_p_k_out
-        
-        # reshape needed when sel_k is None because of its implicit meaning
-        # as np.newaxis (which would create a 2D array)
-        log_q_k -= log_S[sel_k].reshape(log_q_k.size)
-        log_q2_k -= log_S2[sel2_k].reshape(log_q2_k.size)
-        sum_i_q_k = np.exp(self._logsum(log_q_k)) + np.exp(self._logsum(log_q2_k))
-        # amplitude
-        self.amp[k] = sum_i_q_k/n_points
-
-        # mean
-        qk = np.exp(log_q_k)
-        q2k = np.exp(log_q2_k)
-        d = data[sel_k].reshape((log_q_k.size, self.D))
-        d2 = data2[sel2_k].reshape((log_q2_k.size, self.D))
-        self.mean[k,:] = ((d * qk[:,None]).sum(axis=0) +
-                          (d2 * q2k[:,None]).sum(axis=0))/sum_i_q_k
-                               
-        # covariance
-        d_m = d - self.mean[k]
-        d2_m = d2 - self.mean[k]
-
-        # imputation correction
-        self.covar[k] *= frac_p_k_out
-                               
-        # funny way of saying: for each point i, do the outer product
-        # of d_m with its transpose, multiply with pi[i], and sum over i
-        self.covar[k,:,:] += (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) + (q2k[:, None, None] * d2_m[:, :, None] * d2_m[:, None, :]).sum(axis=0)
-
-        # Bayesian regularization term
-        if self.w > 0:
-            self.covar[k,:,:] += self.w*np.eye(self.D)
-            self.covar[k,:,:] /= sum_i_q_k + 1
-        else:
-            self.covar[k,:,:] /= sum_i_q_k
-
-        # need to undo change to log_q_k because we need to reuse
-        # FIXME: stupid!!!
-        log_q_k += log_S[sel_k].reshape(log_q_k.size)
 
     def _logsum(self, l):
         """Computes log of a sum, given the log of the elements.
