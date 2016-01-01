@@ -84,11 +84,14 @@ class ICGMM(GMM):
             mean__ = np.empty((RD, self.K, self.D))
             covar__ = np.empty((RD, self.K, self.D, self.D))
 
-            # save the M results from the non-imputed data
+            # save the M sums from the non-imputed data
             A = np.empty(self.K)
             M = np.empty((self.K, self.D))
             C = np.empty((self.K, self.D, self.D))
             P = np.empty(self.K)
+
+            # save volumes to see which components change
+            V = np.linalg.det(self.covar)
             
             while it < maxiter:
 
@@ -106,7 +109,7 @@ class ICGMM(GMM):
                     S[sel[k]] += np.exp(log_p[k])
                     N[sel[k]] = 1
                     if self.verbose:
-                        print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
+                        print "    k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
                 log_S[N] = np.log(S[N])
                 for k in xrange(self.K):
                     A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k], n_impute=n_impute)
@@ -130,7 +133,7 @@ class ICGMM(GMM):
                         log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
                         S2[sel2[k]] += np.exp(log_p2[k])
                         if self.verbose:
-                            print "  k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
+                            print "    k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
 
                     log_S2 = np.log(S2)
                     logL__[rd] = np.concatenate((log_S[N], log_S2)).mean()
@@ -169,6 +172,18 @@ class ICGMM(GMM):
                 self.amp = amp__.mean(axis=0) 
                 self.mean = mean__.mean(axis=0) 
                 self.covar = covar__.mean(axis=0)
+
+                # check new component volumes and reset sel when it grows by
+                # more then 25%
+                V_ = np.linalg.det(self.covar)
+                changed = np.flatnonzero((V_- V)/V > 0.25)
+                if self.verbose:
+                    print (V_ - V)/V
+                for c in changed:
+                    sel[c] = None
+                    if self.verbose:
+                        print " resetting sel[%d]" % c
+                V[:] = V_[:]
                 
                 it += 1
 
