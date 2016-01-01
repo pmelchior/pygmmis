@@ -133,7 +133,7 @@ plotResults(orig, sel, no_imp, patch=ps)
 # 2) same with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_impute=(sel==False).sum(), sel_callback=cb, verbose=False)
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -146,6 +146,22 @@ for r in xrange(R):
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
 
+
+# 3) same with imputation, but without knowing how many points are missing
+imp2 = iemgmm.GMM(K=K*R, D=D)
+for r in xrange(R):
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=None, verbose=False)
+    ll[r] = imp_.logL(data).mean()
+    imp2.amp[r*K:(r+1)*K] = imp_.amp
+    imp2.mean[r*K:(r+1)*K,:] = imp_.mean
+    imp2.covar[r*K:(r+1)*K,:,:] = imp_.covar
+imp2.amp /= imp2.amp.sum()
+plotResults(orig, sel, imp2, patch=ps)
+
+for r in xrange(R):
+    imp2.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+imp2.amp /= imp2.amp.sum()
+plotResults(orig, sel, imp2, patch=ps)
 
 
 

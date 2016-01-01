@@ -67,6 +67,8 @@ def getTaperedDensity(coords):
     mask[np.random.random(coords.shape[0]) < coords[:,0]/10] = 0
     return mask
 
+
+
 # draw N points from 3-component GMM
 N = 400
 D = 2
@@ -84,10 +86,9 @@ gmm.covar[:,:,:] = np.array([[[ 0.08530014, -0.00314178],
                              [ 0.00409287,  0.01065186]]])*100
 orig = gmm.draw(N)
 
-
-
-K = 6
+K = 3
 R = 10
+
 
 # limit data to within the box
 cb = getBoxWithHole
@@ -97,6 +98,17 @@ ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
 sel = cb(orig)
 data = orig[sel]
 
+"""
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1)#, verbose=True)
+plotResults(orig, sel, new_gmm, patch=ps)
+
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), verbose=True)
+plotResults(orig, sel, new_gmm, patch=ps)
+
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=None, verbose=True)
+plotResults(orig, sel, new_gmm, patch=ps)
+"""
+
 # 1) GMM with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
 ll = np.empty(R)
@@ -104,7 +116,7 @@ import datetime
 
 start = datetime.datetime.now()
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_impute=(sel==False).sum(), sel_callback=cb, verbose=False)
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_missing=(sel==False).sum(), sel_callback=cb, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -119,10 +131,10 @@ imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
 
 
-# 1) ICGMM with imputation
+# 2) ICGMM with imputation
 start = datetime.datetime.now()
 for r in xrange(R):
-    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, n_impute=(sel==False).sum(), sel_callback=cb, verbose=False)
+    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=(sel==False).sum(), verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -136,8 +148,22 @@ for r in xrange(R):
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
 
+# 3) ICGMM with imputation but unknown n_missing
+start = datetime.datetime.now()
+for r in xrange(R):
+    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=None, verbose=False)
+    ll[r] = imp_.logL(data).mean()
+    imp.amp[r*K:(r+1)*K] = imp_.amp
+    imp.mean[r*K:(r+1)*K,:] = imp_.mean
+    imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+imp.amp /= imp.amp.sum()
+print "execution time %ds" % (datetime.datetime.now() - start).seconds
+plotResults(orig, sel, imp, patch=ps)
 
-
+for r in xrange(R):
+    imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+imp.amp /= imp.amp.sum()
+plotResults(orig, sel, imp, patch=ps)
 
 
 

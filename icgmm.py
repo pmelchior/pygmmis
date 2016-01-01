@@ -5,13 +5,13 @@ import numpy as np
 
 class ICGMM(GMM):
 
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, n_impute=0, sel_callback=None, verbose=False):
+    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, verbose=False):
         self.verbose = verbose
         if data is not None:
             self.D = data.shape[1]
             self.w = w
             self.initializeModel(K, s, data)     # will need randoms if non-uniform
-            self._run_EM(data, cutoff=cutoff, n_impute=n_impute, sel_callback=sel_callback)
+            self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
         else:
             self.D = D
             self.amp = np.zeros((K))
@@ -19,7 +19,7 @@ class ICGMM(GMM):
             self.covar = np.empty((K,D,D))
             
     # no imputation for now
-    def _run_EM(self, data, cutoff=None, n_impute=0, sel_callback=None, tol=1e-3):
+    def _run_EM(self, data, cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
         maxiter = 100
 
         # sum_k p(x|k) -> S
@@ -68,21 +68,23 @@ class ICGMM(GMM):
             it += 1
             
         # do we need imputation?
-        if n_impute > 0:
+        if sel_callback is not None:
 
             if self.verbose:
-                print "starting imputation with ~%d extra points" % n_impute 
+                print "starting imputation:"
             
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
             # and adopt their _mean_ model for the next iteration
             it = 0
             logL0 = None
+            n_guess = None
             RD = 5 # repeated draws for imputation
             logL__ = np.empty(RD)
             amp__ = np.empty((RD, self.K))
             mean__ = np.empty((RD, self.K, self.D))
             covar__ = np.empty((RD, self.K, self.D, self.D))
+            n_impute__ = np.empty(RD)
 
             # save the M sums from the non-imputed data
             A = np.empty(self.K)
@@ -112,13 +114,13 @@ class ICGMM(GMM):
                         print "    k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
                 log_S[N] = np.log(S[N])
                 for k in xrange(self.K):
-                    A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k], n_impute=n_impute)
+                    A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k], impute=True)
                 
                 rd = 0
                 while rd < RD:
                     
                     # create imputated data
-                    data2 = self._I(n_impute, sel_callback=sel_callback)
+                    data2 = self._I(sel_callback, len(data), n_missing=n_missing, n_guess=n_guess)
 
                     # similar setup as above, but since imputated points
                     # are drawn from the model, we can avoid the caution of
@@ -137,6 +139,7 @@ class ICGMM(GMM):
 
                     log_S2 = np.log(S2)
                     logL__[rd] = np.concatenate((log_S[N], log_S2)).mean()
+                    n_impute__[rd] = len(data2)
                     for k in xrange(self.K):
                         self._M2(k, data2, log_p2[k], log_S2, sel2[k], A[k], M[k], C[k], P[k], N.sum())
 
@@ -173,16 +176,17 @@ class ICGMM(GMM):
                 self.mean = mean__.mean(axis=0) 
                 self.covar = covar__.mean(axis=0)
 
+                # update n_guess with <n_impute>
+                n_guess = n_impute__.mean()
+
                 # check new component volumes and reset sel when it grows by
                 # more then 25%
                 V_ = np.linalg.det(self.covar)
                 changed = np.flatnonzero((V_- V)/V > 0.25)
-                if self.verbose:
-                    print (V_ - V)/V
                 for c in changed:
                     sel[c] = None
                     if self.verbose:
-                        print " resetting sel[%d]" % c
+                        print " resetting sel[%d] due to volume change" % c
                 V[:] = V_[:]
                 
                 it += 1
@@ -222,10 +226,10 @@ class ICGMM(GMM):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
-    def _M(self, k, data, log_p_k, log_S, sel_k, n_points, n_impute=0):
+    def _M(self, k, data, log_p_k, log_S, sel_k, n_points, impute=False):
 
         # get the relevant sums
-        A_k, M_k, C_k, P_k = self._computeMSums(k, data, log_p_k, log_S, sel_k, n_impute=n_impute)
+        A_k, M_k, C_k, P_k = self._computeMSums(k, data, log_p_k, log_S, sel_k, impute=impute)
         
         # amplitude: A_k = sum_i q_ik
         self.amp[k] = A_k/n_points
@@ -243,7 +247,7 @@ class ICGMM(GMM):
     def _M2(self, k, data2, log_p2_k, log_S2, sel2_k, A_k, M_k, C_k, P_k, n_points):
         # get the relevant sums from data2
         n_points2 = len(data2)
-        A2_k, M2_k, C2_k, P2_k = self._computeMSums(k, data2, log_p2_k, log_S2, sel2_k, n_impute=True)
+        A2_k, M2_k, C2_k, P2_k = self._computeMSums(k, data2, log_p2_k, log_S2, sel2_k, impute=True)
 
         # this is now the sum_i q_ik for i in [data, data2]
         sum_i_q_k = A_k + A2_k
@@ -263,9 +267,9 @@ class ICGMM(GMM):
         else:
             self.covar[k,:,:] = (C_k + C2_k + self.covar[k] * frac_p_k_out) / sum_i_q_k
 
-    def _computeMSums(self, k, data, log_p_k, log_S, sel_k, n_impute=0):
+    def _computeMSums(self, k, data, log_p_k, log_S, sel_k, impute=False):
         # maybe needed for later _M2 calls: P_k = sum_i p_ik
-        if n_impute > 0:
+        if impute:
             P_k = np.exp(self._logsum(log_p_k))
         else:
             P_k = None

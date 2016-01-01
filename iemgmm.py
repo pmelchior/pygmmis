@@ -3,13 +3,13 @@
 import numpy as np
 
 class GMM:
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., n_impute=0, sel_callback=None, verbose=False):
+    def __init__(self, K=1, D=1, data=None, s=None, w=0., sel_callback=None, n_missing=None, verbose=False):
         self.verbose = verbose
         if data is not None:
             self.D = data.shape[1]
             self.w = w
             self.initializeModel(K, s, data)
-            self._run_EM(data, n_impute=n_impute, sel_callback=sel_callback)
+            self._run_EM(data, sel_callback=sel_callback, n_missing=n_missing)
         else:
             self.D = D
             self.amp = np.zeros((K))
@@ -53,7 +53,7 @@ class GMM:
         log_p = self._E(data)
         return self._logsum(log_p.T)
 
-    def _run_EM(self, data, n_impute=0, sel_callback=None, tol=1e-3):
+    def _run_EM(self, data, sel_callback=None, n_missing=None, tol=1e-3):
         maxiter = 100
         
         # standard EM
@@ -79,19 +79,21 @@ class GMM:
             it += 1
 
         # do we need imputation?
-        if n_impute > 0:
+        if sel_callback is not None:
 
             # for each iteration, draw several fake data sets
             # estimate mean and std of their logL, test for convergence,
             # and adopt their _mean_ model for the next iteration
             it = 0
             logL0 = None
+            n_guess = None
             RD = 5 # repeated draws for imputation
             logL__ = np.empty(RD)
             amp__ = np.empty((RD, self.K))
             mean__ = np.empty((RD, self.K, self.D))
             covar__ = np.empty((RD, self.K, self.D, self.D))
-            
+            n_impute__ = np.empty(RD)
+
             while it < maxiter:
                 amp_ = self.amp.copy()
                 mean_ = self.mean.copy()
@@ -104,21 +106,22 @@ class GMM:
                     self.amp[:] = amp_[:]
                     self.mean[:,:] = mean_[:,:]
                     self.covar[:,:,:] = covar_[:,:,:]
-                    
-                    data_out = self._I(n_impute, sel_callback=sel_callback)
+
+                    data_out = self._I(sel_callback, len(data), n_missing=n_missing, n_guess=n_guess)
                     data_ = np.concatenate((data, data_out), axis=0)
 
                     # perform EM on extended data
                     log_p = self._E(data_)
                     logL__[rd] = self._logsum(log_p.T).mean()
-                    self._M(data_, log_p, n_impute=n_impute)
+                    n_impute__[rd] = len(data_out)
+                    self._M(data_, log_p, n_impute=n_impute__[rd])
 
                     # save model
                     amp__[rd,:] = self.amp[:]
                     mean__[rd,:,:] = self.mean[:,:]
                     covar__[rd,:,:,:] = self.covar[:,:,:]
                     if self.verbose:
-                        print "   iter %d/%d: %.3f" % (it, rd, logL__[rd])
+                        print "   iter %d/%d: %.3f (%d + %d)" % (it, rd, logL__[rd], len(data), n_impute)
                     rd += 1
                     
                 # convergence test:
@@ -138,6 +141,7 @@ class GMM:
                 self.amp = amp__.mean(axis=0) 
                 self.mean = mean__.mean(axis=0) 
                 self.covar = covar__.mean(axis=0)
+                n_guess = n_impute__.mean()
                 it += 1
 
     def initializeModel(self, K, s, data):
@@ -240,13 +244,40 @@ class GMM:
             else:
                 self.covar[k,:,:] /= sum_i_q[k]
 
-    def _I(self, n_impute, sel_callback=None):
+    def _I(self, sel_callback, len_data=None, n_missing=None, n_guess=None, alpha=0.05):
         # create imputation sample from the current model
-        # we don know the number if missing values exactly, so
-        # draw from a Poisson distribution
-        n_samples = np.random.poisson(n_impute)
-        return self.draw(size=n_samples, sel_callback=sel_callback, invert_callback=True)
+        if n_missing is not None:
+            return self.draw(size=n_missing, sel_callback=sel_callback, invert_callback=True)
+        else:
+            if len_data is None:
+                raise RuntimeError("I: need len_data when n_missing is None!")
+            
+            # confidence interval for Poisson variate len_data
+            from scipy.stats import chi2
+            lower = 0.5*chi2.ppf(alpha/2, 2*len_data)
+            upper = 0.5*chi2.ppf(1 - alpha/2, 2*len_data + 2)
 
+            # N: current guess of the whole sample, of which we can only
+            # see the observable fraction len_data
+            N = len_data
+            if n_guess is not None:
+                N += n_guess
+            while True:
+                # draw N without any selection
+                sample = self.draw(N)
+                # check if observed fraction is compatible with Poisson(len_data)
+                sel = sel_callback(sample)
+                N_o = sel.sum() # predicted observed
+                if lower <= N_o and N_o <= upper:
+                    return sample[sel==False] # 
+                else:
+                    # update N assuming N_o/N is ~correct and independent of N
+                    N = max(int(N*1.0/N_o * len_data), len_data)
+            
+        
+            
+        
+        
 
 
 
