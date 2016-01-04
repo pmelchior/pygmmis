@@ -5,7 +5,7 @@ import numpy as np
 
 class ICGMM(GMM):
 
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, rng=None, verbose=False):
+    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
         if rng is None:
             self.rng = np.random
         else:
@@ -15,7 +15,10 @@ class ICGMM(GMM):
         if data is not None:
             self.D = data.shape[1]
             self.w = w
-            self._initializeModel(K, s, data)     # will need randoms if non-uniform
+            if init_callback is not None:
+                self.amp, self.mean, self.covar = init_callback(K)
+            else:
+                self._initializeModel(K, s, data)
             self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
         else:
             self.D = D
