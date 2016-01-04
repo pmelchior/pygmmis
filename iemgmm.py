@@ -3,12 +3,20 @@
 import numpy as np
 
 class GMM:
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., sel_callback=None, n_missing=None, verbose=False):
+    def __init__(self, K=1, D=1, data=None, s=None, w=0., sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
+        if rng is None:
+            self.rng = np.random
+        else:
+            self.rng = rng
         self.verbose = verbose
+
         if data is not None:
             self.D = data.shape[1]
             self.w = w
-            self.initializeModel(K, s, data)
+            if init_callback is not None:
+                self.amp, self.mean, self.covar = init_callback(K)
+            else:
+                self._initializeModel(K, s, data)
             self._run_EM(data, sel_callback=sel_callback, n_missing=n_missing)
         else:
             self.D = D
@@ -22,7 +30,7 @@ class GMM:
 
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
-        ind = np.random.choice(self.K, size=size, p=self.amp)
+        ind = self.rng.choice(self.K, size=size, p=self.amp)
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
@@ -31,11 +39,11 @@ class GMM:
             for c in components:
                 mask = ind == c
                 s = mask.sum()
-                samples[counter:counter+s] = np.random.multivariate_normal(self.mean[c], self.covar[c], size=s)
+                samples[counter:counter+s] = self.rng.multivariate_normal(self.mean[c], self.covar[c], size=s)
                 counter += s
         else:
             for i in ind:
-                samples[counter] = np.random.multivariate_normal(self.mean[i], self.covar[i], size=1)
+                samples[counter] = self.rng.multivariate_normal(self.mean[i], self.covar[i], size=1)
                 counter += 1
 
         # if subsample with selection is required
@@ -144,12 +152,12 @@ class GMM:
                 n_guess = n_impute__.mean()
                 it += 1
 
-    def initializeModel(self, K, s, data):
+    def _initializeModel(self, K, s, data):
         # set model to random positions with equally sized spheres
         self.amp = np.ones(K)/K # now self.K works
         min_pos = data.min(axis=0)
         max_pos = data.max(axis=0)
-        self.mean = min_pos + (max_pos-min_pos)*np.random.random(size=(self.K, self.D))
+        self.mean = min_pos + (max_pos-min_pos)*self.rng.rand(self.K, self.D)
         # if s is not set: use volume filling argument:
         # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
         # should completely fill the volume spanned by data.

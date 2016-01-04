@@ -68,10 +68,16 @@ def getTaperedDensity(coords):
     mask[np.random.random(coords.shape[0]) < coords[:,0]/10] = 0
     return mask
 
+
+# set up RNG
+seed = 42
+from numpy.random import RandomState
+rng = RandomState(seed)
+
 # draw N points from 3-component GMM
 N = 400
 D = 2
-gmm = iemgmm.GMM(K=3, D=2)
+gmm = iemgmm.GMM(K=3, D=2, rng=rng)
 gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
 gmm.amp /= gmm.amp.sum()
 gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -85,7 +91,7 @@ gmm.covar[:,:,:] = np.array([[[ 0.08530014, -0.00314178],
                              [ 0.00409287,  0.01065186]]])*100
 orig = gmm.draw(N)
 
-
+# define selection
 """
 cb = getHole
 ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted', lw=1)
@@ -108,14 +114,16 @@ ps = None
 sel = cb(orig)
 data = orig[sel]
 
+# fit the data set
 K = 3
 R = 10
 
 # 1) fit without imputation
 no_imp = iemgmm.GMM(K=K*R, D=D)
 ll = np.empty(R)
+rng = RandomState(seed) # reset the rng for comparable results
 for r in xrange(R):
-    no_imp_ = iemgmm.GMM(K=K, data=data, w=0.1, verbose=False)
+    no_imp_ = iemgmm.GMM(K=K, data=data, w=0.1, rng=rng, verbose=False)
     ll[r] = no_imp_.logL(data).mean()
     no_imp.amp[r*K:(r+1)*K] = no_imp_.amp
     no_imp.mean[r*K:(r+1)*K,:] = no_imp_.mean
@@ -132,8 +140,9 @@ plotResults(orig, sel, no_imp, patch=ps)
 
 # 2) same with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
+rng = RandomState(seed) # reset the rng for comparable results
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), verbose=False)
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -149,8 +158,9 @@ plotResults(orig, sel, imp, patch=ps)
 
 # 3) same with imputation, but without knowing how many points are missing
 imp2 = iemgmm.GMM(K=K*R, D=D)
+rng = RandomState(seed) # reset the rng for comparable results
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=None, verbose=False)
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp2.amp[r*K:(r+1)*K] = imp_.amp
     imp2.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -162,8 +172,6 @@ for r in xrange(R):
     imp2.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp2.amp /= imp2.amp.sum()
 plotResults(orig, sel, imp2, patch=ps)
-
-
 
 
 

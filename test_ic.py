@@ -68,11 +68,15 @@ def getTaperedDensity(coords):
     return mask
 
 
+# set up RNG
+seed = 42
+from numpy.random import RandomState
+rng = RandomState(seed)
 
 # draw N points from 3-component GMM
 N = 400
 D = 2
-gmm = iemgmm.GMM(K=3, D=2)
+gmm = iemgmm.GMM(K=3, D=2, rng=rng)
 gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
 gmm.amp /= gmm.amp.sum()
 gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -164,7 +168,6 @@ for r in xrange(R):
     imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
-
 
 
 

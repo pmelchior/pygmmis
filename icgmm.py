@@ -5,12 +5,17 @@ import numpy as np
 
 class ICGMM(GMM):
 
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, verbose=False):
+    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, rng=None, verbose=False):
+        if rng is None:
+            self.rng = np.random
+        else:
+            self.rng = rng
         self.verbose = verbose
+        
         if data is not None:
             self.D = data.shape[1]
             self.w = w
-            self.initializeModel(K, s, data)     # will need randoms if non-uniform
+            self._initializeModel(K, s, data)     # will need randoms if non-uniform
             self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
         else:
             self.D = D
@@ -30,7 +35,7 @@ class ICGMM(GMM):
         N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
         sel = [None for k in xrange(self.K)]
         log_p = [[] for k in xrange(self.K)]
-        
+
         # standard EM
         it = 0
         logL0 = None
@@ -66,7 +71,7 @@ class ICGMM(GMM):
                 logL0 = logL_
 
             it += 1
-            
+
         # do we need imputation?
         if sel_callback is not None:
 
@@ -117,6 +122,10 @@ class ICGMM(GMM):
                     A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k], impute=True)
                 
                 rd = 0
+
+                mean_log_S2 = 0
+                tot_S2 = 0
+                mean_N2 = 0
                 while rd < RD:
                     
                     # create imputated data
@@ -142,7 +151,8 @@ class ICGMM(GMM):
                     n_impute__[rd] = len(data2)
                     for k in xrange(self.K):
                         self._M2(k, data2, log_p2[k], log_S2, sel2[k], A[k], M[k], C[k], P[k], N.sum())
-
+                    self.amp /= self.amp.sum()
+                    
                     # save model
                     amp__[rd,:] = self.amp[:]
                     mean__[rd,:,:] = self.mean[:,:]
@@ -150,6 +160,10 @@ class ICGMM(GMM):
                     
                     if self.verbose:
                         print "   iter %d/%d: %.3f\t|N| = %d" % (it, rd, logL__[rd], N.sum() + len(data2))
+
+                    mean_log_S2 += log_S2.mean()
+                    tot_S2 += np.exp(self._logsum(log_S2))
+                    mean_N2 += len(data2)
 
                     # reset model to current and repeat
                     rd += 1
@@ -169,6 +183,8 @@ class ICGMM(GMM):
                     break
                 else:
                     logL0 = logL__.mean()
+
+                #print "%d\t%d\t%.4f\t%.4f\t%d\t%.4f\t%.4f\t%.4f\t%.4f" % (it, N.sum(), log_S[N].mean(), np.exp(self._logsum(log_S[N])), mean_N2 / RD, mean_log_S2 / RD, tot_S2 / RD, logL__.mean(), np.exp(self._logsum(log_S[N])) + tot_S2 / RD) 
 
                 # because the components remain ordered, we can
                 # adopt the mean of the repeated draws as new model
@@ -249,8 +265,19 @@ class ICGMM(GMM):
         n_points2 = len(data2)
         A2_k, M2_k, C2_k, P2_k = self._computeMSums(k, data2, log_p2_k, log_S2, sel2_k, impute=True)
 
+        
+        #print "\t%d\t%.4f\t%.4f\t%.4f\t%.4f" % (k, P_k, P2_k, A_k, A2_k)
+                                    
         # this is now the sum_i q_ik for i in [data, data2]
         sum_i_q_k = A_k + A2_k
+        
+        """
+        if A2_k > A_k:
+            M2_k *= A_k / A2_k
+            C2_k *= A_k / A2_k
+            A2_k = A_k
+            P2_k = P_k
+        """
         
         # amplitude
         self.amp[k] = sum_i_q_k/(n_points + n_points2)
@@ -261,6 +288,7 @@ class ICGMM(GMM):
         # covariance
         # imputation correction
         frac_p_k_out = P2_k / (P_k + P2_k)
+        
         # Bayesian regularization term
         if self.w > 0:
             self.covar[k,:,:] = (C_k + C2_k + self.covar[k] * frac_p_k_out + self.w*np.eye(self.D)) / (sum_i_q_k + 1)
