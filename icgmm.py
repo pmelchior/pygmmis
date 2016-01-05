@@ -42,7 +42,7 @@ class ICGMM(GMM):
         # standard EM
         it = 0
         logL0 = None
-        while it < maxiter: # limit loop in case of no convergence
+        while it < 5:#maxiter: # limit loop in case of no convergence
             amp_ = self.amp.copy()
             mean_ = self.mean.copy()
             covar_ = self.covar.copy()
@@ -87,7 +87,7 @@ class ICGMM(GMM):
             it = 0
             logL0 = None
             n_guess = None
-            RD = 5 # repeated draws for imputation
+            RD = 50 # repeated draws for imputation
             logL__ = np.empty(RD)
             amp__ = np.empty((RD, self.K))
             mean__ = np.empty((RD, self.K, self.D))
@@ -129,6 +129,7 @@ class ICGMM(GMM):
                 mean_log_S2 = 0
                 tot_S2 = 0
                 mean_N2 = 0
+                
                 while rd < RD:
                     
                     # create imputated data
@@ -182,12 +183,19 @@ class ICGMM(GMM):
                 if self.verbose:
                     print " iter %d: %.3f" % (it, np.array(logL__).mean())
 
-                if it > 0 and logL__.mean() - logL0 < tol:
+                #print "%d\t%d\t%.4f\t%.4f\t%d\t%.4f\t%.4f\t%.4f\t%.4f" % (it, N.sum(), log_S[N].mean(), np.exp(self._logsum(log_S[N])), mean_N2 / RD, mean_log_S2 / RD, tot_S2 / RD, logL__.mean(), np.exp(self._logsum(log_S[N])) + tot_S2 / RD) 
+                print "%d\t%d\t%.4f\t%.4f\t%d\t%.4f\t%.4f\t%.4f\t%.4f" % (it, N.sum(), log_S[N].mean(), self._logsum(log_S[N]), mean_N2 / RD, mean_log_S2 / RD, np.log(tot_S2 / RD), logL__.mean(), self._logsum(log_S[N]) + np.log(tot_S2 / RD)) 
+                """if it > 0 and logL__.mean() - logL0 < tol:
                     break
                 else:
-                    logL0 = logL__.mean()
+                    logL0 = logL__.mean()"""
 
-                #print "%d\t%d\t%.4f\t%.4f\t%d\t%.4f\t%.4f\t%.4f\t%.4f" % (it, N.sum(), log_S[N].mean(), np.exp(self._logsum(log_S[N])), mean_N2 / RD, mean_log_S2 / RD, tot_S2 / RD, logL__.mean(), np.exp(self._logsum(log_S[N])) + tot_S2 / RD) 
+                logL_tot = self._logsum(log_S[N]) + np.log(tot_S2 / RD)
+                if it > 0 and  logL_tot - logL0 < tol:
+                    break
+                else:
+                    logL0 = logL_tot
+
 
                 # because the components remain ordered, we can
                 # adopt the mean of the repeated draws as new model
@@ -268,20 +276,16 @@ class ICGMM(GMM):
         n_points2 = len(data2)
         A2_k, M2_k, C2_k, P2_k = self._computeMSums(k, data2, log_p2_k, log_S2, sel2_k, impute=True)
 
-        
         #print "\t%d\t%.4f\t%.4f\t%.4f\t%.4f" % (k, P_k, P2_k, A_k, A2_k)
-                                    
-        # this is now the sum_i q_ik for i in [data, data2]
-        sum_i_q_k = A_k + A2_k
-        
-        """
         if A2_k > A_k:
             M2_k *= A_k / A2_k
             C2_k *= A_k / A2_k
             A2_k = A_k
             P2_k = P_k
-        """
-        
+
+        # this is now the sum_i q_ik for i in [data, data2]
+        sum_i_q_k = A_k + A2_k
+
         # amplitude
         self.amp[k] = sum_i_q_k/(n_points + n_points2)
         

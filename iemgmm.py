@@ -277,7 +277,7 @@ class GMM:
                 sel = sel_callback(sample)
                 N_o = sel.sum() # predicted observed
                 if lower <= N_o and N_o <= upper:
-                    return sample[sel==False] # 
+                    return sample[sel==False]
                 else:
                     # update N assuming N_o/N is ~correct and independent of N
                     N = max(int(N*1.0/N_o * len_data), len_data)
