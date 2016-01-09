@@ -117,14 +117,15 @@ plotResults(orig, sel, new_gmm, patch=ps)
 
 new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=None, verbose=False)
 plotResults(orig, sel, new_gmm, patch=ps)
-
 """
+
 
 # 1) GMM with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
 ll = np.empty(R)
 
 start = datetime.datetime.now()
+rng = RandomState(seed)
 for r in xrange(R):
     imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_missing=(sel==False).sum(), sel_callback=cb, rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
@@ -143,6 +144,7 @@ plotResults(orig, sel, imp, patch=ps)
 
 # 2) ICGMM with imputation
 start = datetime.datetime.now()
+rng = RandomState(seed)
 for r in xrange(R):
     imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=(sel==False).sum(), rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
@@ -157,7 +159,6 @@ for r in xrange(R):
     imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
-
 
 # 3) ICGMM with imputation but unknown n_missing
 start = datetime.datetime.now()
@@ -176,6 +177,5 @@ for r in xrange(R):
     imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
-
 
 

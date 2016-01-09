@@ -203,6 +203,12 @@ class ICGMM(GMM):
                 P2 *= rescale
                 M2 *= rescale[:,None]
                 C2 *= rescale[:,None,None]
+                # keep the total amplitude of component fixed by
+                # boosting the weight of the observed points
+                A /= rescale
+                P /= rescale
+                M /= rescale[:,None]
+                C /= rescale[:,None,None]
 
             A += A2
             M += M2
@@ -215,11 +221,6 @@ class ICGMM(GMM):
 
         # the actual update
         self.amp[:] = A / n_points
-        # because of possible rescaling above: need to renormalize
-        # Note: the reduces the weight of a component (wrt others) if
-        # it becomes dominated by imputation points.
-        self.amp /= self.amp.sum()
-        
         self.mean[:,:] = M / A[:,None]
         if self.w > 0:
             self.covar[:,:,:] = (C + (self.w*np.eye(self.D))[None,:,:]) / (A + 1)[:,None,None]
