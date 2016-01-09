@@ -6,11 +6,7 @@ import numpy as np
 class ICGMM(GMM):
 
     def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
-        if rng is None:
-            self.rng = np.random
-        else:
-            self.rng = rng
-        self.verbose = verbose
+        GMM.__init__(self, K=K, D=D, rng=rng, verbose=verbose)
         
         if data is not None:
             self.D = data.shape[1]
@@ -20,11 +16,6 @@ class ICGMM(GMM):
             else:
                 self._initializeModel(K, s, data)
             self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
-        else:
-            self.D = D
-            self.amp = np.zeros((K))
-            self.mean = np.empty((K,D))
-            self.covar = np.empty((K,D,D))
             
     # no imputation for now
     def _run_EM(self, data, cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
@@ -54,9 +45,9 @@ class ICGMM(GMM):
         # begin EM
         it = 0
         logL = None
+        logL_obs = None
         n_impute = None
         n_guess = None
-        delta_logL = None
         while it < maxiter: # limit loop in case of no convergence
 
             # compute p(i | k) for each k independently
@@ -70,7 +61,7 @@ class ICGMM(GMM):
 
             # since log(0) isn't a good idea, need to restrict to N
             log_S[N] = np.log(S[N])
-            logL_ = self._logsum(log_S[N])
+            logL_ = logL_obs_ = self._logsum(log_S[N])
 
             for k in xrange(self.K):
                 A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k])
@@ -111,11 +102,13 @@ class ICGMM(GMM):
                     n_impute += len(data2)
                     
                     for k in xrange(self.K):
-                        a2, m2, c2, p2 = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
-                        A2[k] += a2
-                        M2[k] += m2
-                        C2[k] += c2
-                        P2[k] += p2
+                        # with small imputation sets: sel2[k] might be empty
+                        if sel2[k].size:
+                            a2, m2, c2, p2 = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
+                            A2[k] += a2
+                            M2[k] += m2
+                            C2[k] += c2
+                            P2[k] += p2
 
                     rd += 1
 
@@ -138,12 +131,11 @@ class ICGMM(GMM):
                 print "%d\t%d\t%.4f" % (it, N.sum(), logL_)
                 
             # convergence test:
-            if it > 5 and logL_ - logL < tol:
+            if it > 5 and logL_ - logL < tol and logL_obs_ < logL_obs:
                 break
             else:
-                if it > 0:
-                    delta_logL = logL_ - logL
                 logL = logL_
+                logL_obs = logL_obs_
 
             # perform M step with M-sums of data and imputations runs
             self._M(A, M, C, P, N.sum(), A2, M2, C2, P2, n_impute)
@@ -211,7 +203,7 @@ class ICGMM(GMM):
                 P2 *= rescale
                 M2 *= rescale[:,None]
                 C2 *= rescale[:,None,None]
-            
+
             A += A2
             M += M2
             C += C2

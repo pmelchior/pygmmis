@@ -137,7 +137,7 @@ for r in xrange(R):
 no_imp.amp /= no_imp.amp.sum()
 plotResults(orig, sel, no_imp, patch=ps)
 
-
+"""
 # 2) same with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
 rng = RandomState(seed) # reset the rng for comparable results
@@ -172,6 +172,6 @@ for r in xrange(R):
     imp2.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp2.amp /= imp2.amp.sum()
 plotResults(orig, sel, imp2, patch=ps)
-
+"""
 
 

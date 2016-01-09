@@ -4,6 +4,13 @@ import iemgmm, icgmm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import datetime
+from functools import partial
+
+# set up RNG
+seed = 42
+from numpy.random import RandomState
+rng = RandomState(seed)
 
 def plotResults(data, sel, gmm, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -57,26 +64,20 @@ def getHole(coords):
 def getBoxWithHole(coords):
     return getBox(coords)*getHole(coords)
 
-def getHalfDensity(coords):
+def getHalfDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
-    mask[np.random.random(coords.shape[0]) < 0.9] = 0
+    mask[rng.rand(coords.shape[0]) < 0.5] = 0
     return mask
 
-def getTaperedDensity(coords):
+def getTaperedDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
-    mask[np.random.random(coords.shape[0]) < coords[:,0]/10] = 0
+    mask[rng.rand(coords.shape[0]) < coords[:,0]/7] = 0
     return mask
-
-
-# set up RNG
-seed = 42
-from numpy.random import RandomState
-rng = RandomState(seed)
 
 # draw N points from 3-component GMM
 N = 400
 D = 2
-gmm = iemgmm.GMM(K=3, D=2, rng=rng)
+gmm = icgmm.ICGMM(K=3, D=2, rng=rng)
 gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
 gmm.amp /= gmm.amp.sum()
 gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -93,34 +94,39 @@ orig = gmm.draw(N)
 K = 3
 R = 10
 
-
 # limit data to within the box
-cb = getBoxWithHole
-ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
-      patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
+#cb = getBoxWithHole
+#ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
+#      patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
+#cb = getBox
+#ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
+#cb = getHole
+#ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+cb = partial(getTaperedDensity, rng=rng)
+ps = None
 
 sel = cb(orig)
 data = orig[sel]
 
 """
-new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1)#, verbose=True)
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, rng=rng, verbose=False)
 plotResults(orig, sel, new_gmm, patch=ps)
 
-new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), verbose=True)
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
 plotResults(orig, sel, new_gmm, patch=ps)
 
-new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=None, verbose=True)
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=None, verbose=False)
 plotResults(orig, sel, new_gmm, patch=ps)
+
 """
 
 # 1) GMM with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
 ll = np.empty(R)
-import datetime
 
 start = datetime.datetime.now()
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_missing=(sel==False).sum(), sel_callback=cb, verbose=False)
+    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, n_missing=(sel==False).sum(), sel_callback=cb, rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -138,7 +144,7 @@ plotResults(orig, sel, imp, patch=ps)
 # 2) ICGMM with imputation
 start = datetime.datetime.now()
 for r in xrange(R):
-    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=(sel==False).sum(), verbose=False)
+    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=(sel==False).sum(), rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -151,11 +157,13 @@ for r in xrange(R):
     imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
+
 
 # 3) ICGMM with imputation but unknown n_missing
 start = datetime.datetime.now()
+rng = RandomState(seed)
 for r in xrange(R):
-    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=None, verbose=False)
+    imp_ = icgmm.ICGMM(K=K, data=data, w=0.1, cutoff=10, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -168,8 +176,6 @@ for r in xrange(R):
     imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
-
-
 
 
 
