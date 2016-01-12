@@ -123,7 +123,7 @@ no_imp = iemgmm.GMM(K=K*R, D=D)
 ll = np.empty(R)
 rng = RandomState(seed) # reset the rng for comparable results
 for r in xrange(R):
-    no_imp_ = iemgmm.GMM(K=K, data=data, w=0.1, rng=rng, verbose=False)
+    no_imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, rng=rng, verbose=False)
     ll[r] = no_imp_.logL(data).mean()
     no_imp.amp[r*K:(r+1)*K] = no_imp_.amp
     no_imp.mean[r*K:(r+1)*K,:] = no_imp_.mean
@@ -142,7 +142,7 @@ plotResults(orig, sel, no_imp, patch=ps)
 imp = iemgmm.GMM(K=K*R, D=D)
 rng = RandomState(seed) # reset the rng for comparable results
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), rng=rng, verbose=False)
+    imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp.amp[r*K:(r+1)*K] = imp_.amp
     imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -160,7 +160,7 @@ plotResults(orig, sel, imp, patch=ps)
 imp2 = iemgmm.GMM(K=K*R, D=D)
 rng = RandomState(seed) # reset the rng for comparable results
 for r in xrange(R):
-    imp_ = iemgmm.GMM(K=K, data=data, w=0.1, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
+    imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
     ll[r] = imp_.logL(data).mean()
     imp2.amp[r*K:(r+1)*K] = imp_.amp
     imp2.mean[r*K:(r+1)*K,:] = imp_.mean

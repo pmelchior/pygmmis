@@ -3,30 +3,41 @@
 import numpy as np
 
 class GMM:
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
+    def __init__(self, K=1, D=1, rng=None, verbose=False):
         if rng is None:
             self.rng = np.random
         else:
             self.rng = rng
         self.verbose = verbose
 
-        if data is not None:
-            self.D = data.shape[1]
-            self.w = w
-            if init_callback is not None:
-                self.amp, self.mean, self.covar = init_callback(K)
-            else:
-                self._initializeModel(K, s, data)
-            self._run_EM(data, sel_callback=sel_callback, n_missing=n_missing)
-        else:
-            self.D = D
-            self.amp = np.zeros((K))
-            self.mean = np.empty((K,D))
-            self.covar = np.empty((K,D,D))
+        self.D = D
+        self.amp = np.zeros((K))
+        self.mean = np.empty((K,D))
+        self.covar = np.empty((K,D,D))
             
     @property
     def K(self):
         return self.amp.size
+
+    def save(self, filename, **kwargs):
+        """Save GMM to file.
+
+        Args:
+            filename: name for saved file, should end on .npz as the default
+                      of numpy.savez(), which is called here
+            kwargs:   dictionary of additional information to be stored
+                      in the file. Whatever is stored in kwargs, will be loaded
+                      into ZDFileInfo.
+        Returns:
+            None
+        """
+        if kwargs is None:
+            kwargs = {"amp": self.amp, "mean": self.mean, "covar": self.covar}
+        else:
+            kwargs['amp'] = self.amp
+            kwargs['mean'] = self.mean
+            kwargs['covar'] = self.covar
+        np.savez(filename, **kwargs)
 
     def draw(self, size=1, sel_callback=None, invert_callback=False):
         # draw indices for components given amplitudes
@@ -60,6 +71,73 @@ class GMM:
     def logL(self, data):
         log_p = self._E(data)
         return self._logsum(log_p.T)
+
+    def _E(self, data):
+        # compute p(x | k)
+        # NOTE: normally the E step computes the fractional probability
+        # p (x | k) / (sum_k p(x | k))
+        # We defer this to the M step because we need the proper probs
+        # for per-point likelihoods in some cases.
+        log_p = np.empty((data.shape[0], self.K))
+        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
+        for k in xrange(self.K):
+            dx = data - self.mean[k]
+            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
+            # prevent tiny negative determinants to mess up
+            (sign, logdet) = np.linalg.slogdet(self.covar[k])
+            log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+        return log_p
+
+    def _logsum(self, ll):
+        """Computes log of sum of likelihoods for GMM components.
+
+        This method tries hard to avoid over- or underflow that may arise
+        when computing exp(log(p(x | k)).
+
+        See appendix A of Bovy, Hogg, Roweis (2009).
+
+        Args:
+        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
+
+        Returns:
+        (N, 1) of log of total likelihood
+
+        """
+        floatinfo = np.finfo(ll.dtype)
+        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
+        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
+        c = np.where(underflow < overflow, underflow, overflow)
+        return np.log(np.exp(ll + c).sum(axis=0)) - c
+
+    
+class IEMGMM(GMM):
+
+    def __init__(self, data, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
+        GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
+
+        self.w = w
+        if init_callback is not None:
+            self.amp, self.mean, self.covar = init_callback(K)
+        else:
+            self._initializeModel(K, s, data)
+        self._run_EM(data, sel_callback=sel_callback, n_missing=n_missing)
+
+    def _initializeModel(self, K, s, data):
+        # set model to random positions with equally sized spheres
+        self.amp[:] = np.ones(K)/K # now self.K works
+        min_pos = data.min(axis=0)
+        max_pos = data.max(axis=0)
+        self.mean[:,:] = min_pos + (max_pos-min_pos)*self.rng.rand(self.K, self.D)
+        # if s is not set: use volume filling argument:
+        # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
+        # should completely fill the volume spanned by data.
+        if s is None:
+            from scipy.special import gamma
+            vol_data = np.prod(max_pos-min_pos)
+            s = (vol_data / self.K * gamma(self.D*0.5 + 1))**(1./self.D) / np.sqrt(np.pi)
+            if self.verbose:
+                print "initializing spheres with s=%.2f" % s
+        self.covar[:,:,:] = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
 
     def _run_EM(self, data, sel_callback=None, n_missing=None, tol=1e-3):
         maxiter = 100
@@ -152,61 +230,7 @@ class GMM:
                 n_guess = n_impute__.mean()
                 it += 1
 
-    def _initializeModel(self, K, s, data):
-        # set model to random positions with equally sized spheres
-        self.amp = np.ones(K)/K # now self.K works
-        min_pos = data.min(axis=0)
-        max_pos = data.max(axis=0)
-        self.mean = min_pos + (max_pos-min_pos)*self.rng.rand(self.K, self.D)
-        # if s is not set: use volume filling argument:
-        # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
-        # should completely fill the volume spanned by data.
-        if s is None:
-            from scipy.special import gamma
-            vol_data = np.prod(max_pos-min_pos)
-            s = (vol_data / self.K * gamma(self.D*0.5 + 1))**(1./self.D) / np.sqrt(np.pi)
-            if self.verbose:
-                print "initializing spheres with s=%.2f" % s
-        self.covar = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
-
-    def _E(self, data):
-        # compute p(x | k)
-        # NOTE: normally the E step computes the fractional probability
-        # p (x | k) / (sum_k p(x | k))
-        # We defer this to the M step because we need the proper probs
-        # for per-point likelihoods in some cases.
-        log_p = np.empty((data.shape[0], self.K))
-        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        for k in xrange(self.K):
-            dx = data - self.mean[k]
-            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
-            # prevent tiny negative determinants to mess up
-            (sign, logdet) = np.linalg.slogdet(self.covar[k])
-            log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
-        return log_p
-
-    def _logsum(self, ll):
-        """Computes log of sum of likelihoods for GMM components.
-
-        This method tries hard to avoid over- or underflow that may arise
-        when computing exp(log(p(x | k)).
-
-        See appendix A of Bovy, Hogg, Roweis (2009).
-
-        Args:
-        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
-
-        Returns:
-        (N, 1) of log of total likelihood
-
-        """
-        floatinfo = np.finfo(ll.dtype)
-        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
-        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
-        c = np.where(underflow < overflow, underflow, overflow)
-        return np.log(np.exp(ll + c).sum(axis=0)) - c
-
-
+    
     def _M(self, data, log_p, n_impute=0):
         N = data.shape[0]
 

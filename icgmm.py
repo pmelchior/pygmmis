@@ -1,21 +1,19 @@
 #!/bin/env python
 
-from iemgmm import GMM
+from iemgmm import GMM, IEMGMM 
 import numpy as np
 
-class ICGMM(GMM):
+class ICGMM(IEMGMM):
 
-    def __init__(self, K=1, D=1, data=None, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
-        GMM.__init__(self, K=K, D=D, rng=rng, verbose=verbose)
+    def __init__(self, data, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
+        GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
         
-        if data is not None:
-            self.D = data.shape[1]
-            self.w = w
-            if init_callback is not None:
-                self.amp, self.mean, self.covar = init_callback(K)
-            else:
-                self._initializeModel(K, s, data)
-            self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
+        self.w = w
+        if init_callback is not None:
+            self.amp, self.mean, self.covar = init_callback(K)
+        else:
+            self._initializeModel(K, s, data)
+        self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
             
     # no imputation for now
     def _run_EM(self, data, cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
