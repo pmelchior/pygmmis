@@ -66,18 +66,21 @@ class ICGMM(GMM):
             for k in xrange(self.K):
                 A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k])
 
+            print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
+
             # need to do MC integral of p(missing | k):
             # get missing data by imputation from the current model
             if sel_callback is not None:
                 rd = 0
                 RD = 200
+                soften = 1 - np.exp(-it*0.1)
                 logL2_ = np.empty(RD)
                 A2 = np.zeros(self.K)
                 M2 = np.zeros((self.K, self.D))
                 C2 = np.zeros((self.K, self.D, self.D))
                 P2 = np.zeros(self.K)
                 n_impute = 0
-                while rd < RD:
+                while rd < RD*soften:
                     
                     # create imputated data
                     data2 = self._I(sel_callback, len(data), n_missing=n_missing, n_guess=n_guess)
@@ -117,22 +120,20 @@ class ICGMM(GMM):
                     # some convergence criterion
                     if False:
                         break
+                if soften > 0 and rd > 0:
+                    A2 *= soften /rd
+                    M2 *= soften / rd
+                    C2 *= soften / rd
+                    P2 *= soften / rd
+                    n_impute = n_impute * soften / rd
+                    logL_ += logL2_[:rd].mean() + np.log(soften)
 
-                soften = 1 - np.exp(-it*0.1)
-                A2 *= soften /rd
-                M2 *= soften / rd
-                C2 *= soften / rd
-                P2 *= soften / rd
-                n_impute = n_impute * soften / rd
-                logL_ += logL2_[:rd].mean()
-
-                # update n_guess with <n_impute>
-                if soften > 0:
+                    # update n_guess with <n_impute>
                     n_guess = n_impute / soften
 
-                print "%d\t%d\t%.4f\t%d\t%d\t%.2f\t%.4f\t%.4f\t%.4f" % (it, N.sum(), self._logsum(log_S[N]),  rd, n_impute, soften, logL2_[:rd].mean(), logL2_[:rd].std()/rd**0.5, logL_)
-            else:
-                print "%d\t%d\t%.4f" % (it, N.sum(), logL_)
+                    print "\t%d\t%d\t%.2f\t%.4f\t%.4f\t%.4f" % (rd, n_impute, soften, logL2_[:rd].mean(), logL2_[:rd].std()/rd**0.5, logL_)
+                else:
+                    print  ""
                 
             # convergence test:
             if it > 5 and logL_ - logL < tol and logL_obs_ < logL_obs:
