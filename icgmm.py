@@ -68,7 +68,7 @@ class ICGMM(GMM):
 
             # need to do MC integral of p(missing | k):
             # get missing data by imputation from the current model
-            if it > 0 and sel_callback is not None:
+            if sel_callback is not None:
                 rd = 0
                 RD = 200
                 logL2_ = np.empty(RD)
@@ -82,51 +82,55 @@ class ICGMM(GMM):
                     # create imputated data
                     data2 = self._I(sel_callback, len(data), n_missing=n_missing, n_guess=n_guess)
 
-                    # similar setup as above, but since imputated points
-                    # are drawn from the model, we can avoid the caution of
-                    # dealing with outliers: all points will be considered
-                    S2 = np.zeros(len(data2))
-                    sel2 = [None for k in xrange(self.K)]
-                    log_p2 = [[] for k in xrange(self.K)]
-            
-                    # run E now on data2
-                    # then combine respective sums in M step
-                    for k in xrange(self.K):
-                        log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
-                        S2[sel2[k]] += np.exp(log_p2[k])
-                        if self.verbose:
-                            print "    k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
+                    if len(data2):
+                        # similar setup as above, but since imputated points
+                        # are drawn from the model, we can avoid the caution of
+                        # dealing with outliers: all points will be considered
+                        S2 = np.zeros(len(data2))
+                        sel2 = [None for k in xrange(self.K)]
+                        log_p2 = [[] for k in xrange(self.K)]
 
-                    log_S2 = np.log(S2)
-                    logL2_[rd] = self._logsum(log_S2)
-                    n_impute += len(data2)
-                    
-                    for k in xrange(self.K):
-                        # with small imputation sets: sel2[k] might be empty
-                        if sel2[k].size:
-                            a2, m2, c2, p2 = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
-                            A2[k] += a2
-                            M2[k] += m2
-                            C2[k] += c2
-                            P2[k] += p2
+                        # run E now on data2
+                        # then combine respective sums in M step
+                        for k in xrange(self.K):
+                            log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
+                            S2[sel2[k]] += np.exp(log_p2[k])
+                            if self.verbose:
+                                print "    k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
 
+                        log_S2 = np.log(S2)
+                        logL2_[rd] = self._logsum(log_S2)
+                        n_impute += len(data2)
+
+                        for k in xrange(self.K):
+                            # with small imputation sets: sel2[k] might be empty
+                            if sel2[k] is None or sel2[k].size:
+                                a2, m2, c2, p2 = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
+                                A2[k] += a2
+                                M2[k] += m2
+                                C2[k] += c2
+                                P2[k] += p2
+
+                    # count even if len(data2) == 0
                     rd += 1
 
                     # some convergence criterion
                     if False:
                         break
-                    
-                A2 /= rd
-                M2 /= rd
-                C2 /= rd
-                P2 /= rd
-                n_impute = 1./rd * n_impute
+
+                soften = 1 - np.exp(-it*0.1)
+                A2 *= soften /rd
+                M2 *= soften / rd
+                C2 *= soften / rd
+                P2 *= soften / rd
+                n_impute = n_impute * soften / rd
                 logL_ += logL2_[:rd].mean()
 
                 # update n_guess with <n_impute>
-                n_guess = n_impute
+                if soften > 0:
+                    n_guess = n_impute / soften
 
-                print "%d\t%d\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f" % (it, N.sum(), self._logsum(log_S[N]),  rd, n_impute, logL2_[:rd].mean(), logL2_[:rd].std()/rd**0.5, logL_)
+                print "%d\t%d\t%.4f\t%d\t%d\t%.2f\t%.4f\t%.4f\t%.4f" % (it, N.sum(), self._logsum(log_S[N]),  rd, n_impute, soften, logL2_[:rd].mean(), logL2_[:rd].std()/rd**0.5, logL_)
             else:
                 print "%d\t%d\t%.4f" % (it, N.sum(), logL_)
                 
@@ -194,22 +198,6 @@ class ICGMM(GMM):
 
         # if imputation was run
         if A2 is not None:
-            # make sure imputated points don't dominate
-            problems = (A2 > A)
-            if problems.any():
-                rescale = np.ones(self.K)
-                rescale[problems] = A[problems] / A2[problems]
-                A2 *= rescale
-                P2 *= rescale
-                M2 *= rescale[:,None]
-                C2 *= rescale[:,None,None]
-                # keep the total amplitude of component fixed by
-                # boosting the weight of the observed points
-                A /= rescale
-                P /= rescale
-                M /= rescale[:,None]
-                C /= rescale[:,None,None]
-
             A += A2
             M += M2
             C += C2

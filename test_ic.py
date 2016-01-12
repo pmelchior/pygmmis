@@ -74,6 +74,9 @@ def getTaperedDensity(coords, rng=np.random):
     mask[rng.rand(coords.shape[0]) < coords[:,0]/7] = 0
     return mask
 
+def getCut(coords):
+    return (coords[:,0] < 5)
+
 # draw N points from 3-component GMM
 N = 400
 D = 2
@@ -89,6 +92,7 @@ gmm.covar[:,:,:] = np.array([[[ 0.08530014, -0.00314178],
                               [0.0125736,  0.01075791]],
                              [[ 0.00258605,  0.00409287],
                              [ 0.00409287,  0.01065186]]])*100
+
 orig = gmm.draw(N)
 
 K = 3
@@ -98,12 +102,16 @@ R = 10
 #cb = getBoxWithHole
 #ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
 #      patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
-#cb = getBox
-#ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
+cb = getBox
+ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
 #cb = getHole
 #ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
-cb = partial(getTaperedDensity, rng=rng)
-ps = None
+#cb = partial(getTaperedDensity, rng=rng)
+#ps = None
+#cb = getCut
+#from matplotlib.path import Path
+#path = Path([(5,-5), (5,15)], [Path.MOVETO, Path.LINETO])
+#ps = patches.PathPatch(path, fc="none", ec='b', ls='dotted')
 
 sel = cb(orig)
 data = orig[sel]
@@ -115,15 +123,14 @@ plotResults(orig, sel, new_gmm, patch=ps)
 new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
 plotResults(orig, sel, new_gmm, patch=ps)
 
-new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=None, verbose=False)
+new_gmm = icgmm.ICGMM(K=K, data=data, cutoff=10, w=0.1, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
 plotResults(orig, sel, new_gmm, patch=ps)
 """
-
 
 # 1) GMM with imputation
 imp = iemgmm.GMM(K=K*R, D=D)
 ll = np.empty(R)
-
+"""
 start = datetime.datetime.now()
 rng = RandomState(seed)
 for r in xrange(R):
@@ -159,6 +166,7 @@ for r in xrange(R):
     imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
 imp.amp /= imp.amp.sum()
 plotResults(orig, sel, imp, patch=ps)
+"""
 
 # 3) ICGMM with imputation but unknown n_missing
 start = datetime.datetime.now()
