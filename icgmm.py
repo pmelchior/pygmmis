@@ -1,11 +1,35 @@
-#!/bin/env python
-
 from iemgmm import GMM, IEMGMM 
 import numpy as np
 
+# this is to allow multiprocessing pools to operate on class methods:
+# https://gist.github.com/bnyeggen/1086393
+def _pickle_method(method):
+	func_name = method.im_func.__name__
+	obj = method.im_self
+	cls = method.im_class
+	if func_name.startswith('__') and not func_name.endswith('__'): #deal with mangled names
+		cls_name = cls.__name__.lstrip('_')
+		func_name = '_' + cls_name + func_name
+	return _unpickle_method, (func_name, obj, cls)
+
+def _unpickle_method(func_name, obj, cls):
+	for cls in cls.__mro__:
+		try:
+			func = cls.__dict__[func_name]
+		except KeyError:
+			pass
+		else:
+			break
+	return func.__get__(obj, cls)
+
+import copy_reg
+import types
+copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
+
+
 class ICGMM(IEMGMM):
 
-    def __init__(self, data, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, verbose=False):
+    def __init__(self, data, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, verbose=False):
         GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
         
         self.w = w
@@ -13,10 +37,10 @@ class ICGMM(IEMGMM):
             self.amp, self.mean, self.covar = init_callback(K)
         else:
             self._initializeModel(K, s, data)
-        self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
+        self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool)
             
     # no imputation for now
-    def _run_EM(self, data, cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
+    def _run_EM(self, data, cutoff=None, sel_callback=None, n_missing=None, pool=None, tol=1e-3):
         maxiter = 100
 
         # sum_k p(x|k) -> S
@@ -69,67 +93,49 @@ class ICGMM(IEMGMM):
             # need to do MC integral of p(missing | k):
             # get missing data by imputation from the current model
             if sel_callback is not None:
-                rd = 0
                 RD = 200
                 soften = 1 - np.exp(-it*0.1)
-                logL2_ = np.empty(RD)
+                RDs = int(RD*soften)
+                logL2 = 0
                 A2 = np.zeros(self.K)
                 M2 = np.zeros((self.K, self.D))
                 C2 = np.zeros((self.K, self.D, self.D))
                 P2 = np.zeros(self.K)
                 n_impute = 0
-                while rd < RD*soften:
-                    
-                    # create imputated data
-                    data2 = self._I(sel_callback, len(data), n_missing=n_missing, n_guess=n_guess)
 
-                    if len(data2):
-                        # similar setup as above, but since imputated points
-                        # are drawn from the model, we can avoid the caution of
-                        # dealing with outliers: all points will be considered
-                        S2 = np.zeros(len(data2))
-                        sel2 = [None for k in xrange(self.K)]
-                        log_p2 = [[] for k in xrange(self.K)]
+                if pool is None:
+                    for rd in xrange(RDs):
+                        A2_, M2_, C2_, P2_, logL2_, n_impute_ = self._computeIMSums(sel_callback, len(data), n_missing, n_guess, cutoff)
+                        A2 += A2_
+                        M2 += M2_
+                        C2 += C2_
+                        P2 += P2_
+                        logL2 += logL2_
+                        n_impute += n_impute_
+                else:
+                    results = [pool.apply_async(self._computeIMSums, (sel_callback, len(data), n_missing, n_guess, cutoff)) for rd in xrange(RDs)]
+                    for r in results:
+                        A2_, M2_, C2_, P2_, logL2_, n_impute_ = r.get()
+                        A2 += A2_
+                        M2 += M2_
+                        C2 += C2_
+                        P2 += P2_
+                        logL2 += logL2_
+                        n_impute += n_impute_
 
-                        # run E now on data2
-                        # then combine respective sums in M step
-                        for k in xrange(self.K):
-                            log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
-                            S2[sel2[k]] += np.exp(log_p2[k])
-                            if self.verbose:
-                                print "    k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
-
-                        log_S2 = np.log(S2)
-                        logL2_[rd] = self._logsum(log_S2)
-                        n_impute += len(data2)
-
-                        for k in xrange(self.K):
-                            # with small imputation sets: sel2[k] might be empty
-                            if sel2[k] is None or sel2[k].size:
-                                a2, m2, c2, p2 = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
-                                A2[k] += a2
-                                M2[k] += m2
-                                C2[k] += c2
-                                P2[k] += p2
-
-                    # count even if len(data2) == 0
-                    rd += 1
-
-                    # some convergence criterion
-                    if False:
-                        break
-                if soften > 0 and rd > 0:
-                    A2 *= soften /rd
-                    M2 *= soften / rd
-                    C2 *= soften / rd
-                    P2 *= soften / rd
-                    n_impute = n_impute * soften / rd
-                    logL_ += logL2_[:rd].mean() + np.log(soften)
+                if soften > 0 and RDs > 0:
+                    A2 *= soften / RDs
+                    M2 *= soften / RDs
+                    C2 *= soften / RDs
+                    P2 *= soften / RDs
+                    logL2 /= RDs
+                    logL_ += logL2 + np.log(soften)
+                    n_impute = n_impute * soften / RDs
 
                     # update n_guess with <n_impute>
                     n_guess = n_impute / soften
 
-                    print "\t%d\t%d\t%.2f\t%.4f\t%.4f\t%.4f" % (rd, n_impute, soften, logL2_[:rd].mean(), logL2_[:rd].std()/rd**0.5, logL_)
+                    print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
                 else:
                     print  ""
                 
@@ -213,7 +219,41 @@ class ICGMM(IEMGMM):
             self.covar[:,:,:] = (C + (self.w*np.eye(self.D))[None,:,:]) / (A + 1)[:,None,None]
         else:
             self.covar[:,:,:] = C / A[:,None,None]
-            
+
+    def _computeIMSums(self, sel_callback, len_data, n_missing, n_guess, cutoff):
+        # create imputated data
+        data2 = self._I(sel_callback, len_data, n_missing=n_missing, n_guess=n_guess)
+        A2 = np.zeros(self.K)
+        M2 = np.zeros((self.K, self.D))
+        C2 = np.zeros((self.K, self.D, self.D))
+        P2 = np.zeros(self.K)
+        
+        if len(data2):
+            # similar setup as above, but since imputated points
+            # are drawn from the model, we can avoid the caution of
+            # dealing with outliers: all points will be considered
+            S2 = np.zeros(len(data2))
+            sel2 = [None for k in xrange(self.K)]
+            log_p2 = [[] for k in xrange(self.K)]
+
+            # run E now on data2
+            # then combine respective sums in M step
+            for k in xrange(self.K):
+                log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
+                S2[sel2[k]] += np.exp(log_p2[k])
+                if self.verbose:
+                    print "    k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
+
+            log_S2 = np.log(S2)
+            logL2_ = self._logsum(log_S2)
+            n_impute = len(data2)
+
+            for k in xrange(self.K):
+                # with small imputation sets: sel2[k] might be empty
+                if sel2[k] is None or sel2[k].size:
+                    A2[k], M2[k], C2[k], P2[k] = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
+        return A2, M2, C2, P2, logL2_, n_impute
+
 
     def _computeMSums(self, k, data, log_p_k, log_S, sel_k):
         # needed for imputation correction: P_k = sum_i p_ik

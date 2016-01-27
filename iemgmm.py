@@ -1,8 +1,6 @@
-#!/bin/env python
-
 import numpy as np
 
-class GMM:
+class GMM(object):
     def __init__(self, K=1, D=1, rng=None, verbose=False):
         if rng is None:
             self.rng = np.random
