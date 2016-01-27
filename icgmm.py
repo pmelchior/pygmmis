@@ -88,7 +88,8 @@ class ICGMM(IEMGMM):
             for k in xrange(self.K):
                 A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k])
 
-            print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
+            if self.verbose:
+                print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
 
             # need to do MC integral of p(missing | k):
             # get missing data by imputation from the current model
@@ -135,8 +136,9 @@ class ICGMM(IEMGMM):
                     # update n_guess with <n_impute>
                     n_guess = n_impute / soften
 
-                    print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
-                else:
+                    if self.verbose:
+                        print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
+                elif self.verbose:
                     print  ""
                 
             # convergence test:
@@ -244,8 +246,6 @@ class ICGMM(IEMGMM):
             for k in xrange(self.K):
                 log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
                 S2[sel2[k]] += np.exp(log_p2[k])
-                if self.verbose:
-                    print "    k = %d: |I2| = %d <S> = %.3f" % (k, log_p2[k].size, np.log(S2[sel2[k]]).mean())
 
             log_S2 = np.log(S2)
             logL2_ = self._logsum(log_S2)
