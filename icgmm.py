@@ -29,7 +29,7 @@ copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
 class ICGMM(IEMGMM):
 
-    def __init__(self, data, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, verbose=False):
+    def __init__(self, data, covar=None, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, verbose=False):
         GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
         
         self.w = w
@@ -37,10 +37,10 @@ class ICGMM(IEMGMM):
             self.amp, self.mean, self.covar = init_callback(K)
         else:
             self._initializeModel(K, s, data)
-        self._run_EM(data, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool)
+        self._run_EM(data, covar=covar, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool)
             
     # no imputation for now
-    def _run_EM(self, data, cutoff=None, sel_callback=None, n_missing=None, pool=None, tol=1e-3):
+    def _run_EM(self, data, covar=None, cutoff=None, sel_callback=None, n_missing=None, pool=None, tol=1e-3):
         maxiter = 100
 
         # sum_k p(x|k) -> S
@@ -75,7 +75,7 @@ class ICGMM(IEMGMM):
             # compute p(i | k) for each k independently
             # need S = sum_k p(i | k) for further calculation
             for k in xrange(self.K):
-                log_p[k] = self._E(k, data, neighborhood, cutoff=cutoff)
+                log_p[k], neighborhood[k] = self._E(k, data, covar=covar, neighborhood_k=neighborhood[k], cutoff=cutoff)
                 S[neighborhood[k]] += np.exp(log_p[k])
                 N[neighborhood[k]] = 1
                 if self.verbose:
@@ -166,39 +166,38 @@ class ICGMM(IEMGMM):
             it += 1
 
             
-    def logL(self, data, cutoff=None):
+    def logL(self, data, covar=None, cutoff=None):
         S = np.zeros(len(data))
-        neighborhood = [None for k in xrange(self.K)]
         for k in xrange(self.K):
             # to minimize the components with tiny p(x|k) in sum:
             # only use those within cutoff
-            log_p_k = self._E(k, data, neighborhood, cutoff=cutoff)
-            S[neighborhood[k]] += np.exp(log_p_k)
+            log_p_k, neighborhood_k = self._E(k, data, covar=covar, cutoff=cutoff)
+            S[neighborhood_k] += np.exp(log_p_k)
         return np.log(S)
 
-    def _E(self, k, data, neighborhood, cutoff=None):
+    def _E(self, k, data, covar=None, neighborhood_k=None, cutoff=None):
         # p(x | k) for all x in the vicinity of k
         # determine all points within cutoff sigma from mean[k]
-        if cutoff is None or neighborhood[k] is None:
+        if cutoff is None or neighborhood_k is None:
             dx = data - self.mean[k]
         else:
-            dx = data[neighborhood[k]] - self.mean[k]
+            dx = data[neighborhood_k] - self.mean[k]
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
         # close to convergence, we can stop applying the cutoff because
         # changes to neighborhood will be minimal
         if cutoff is not None:
             indices = np.flatnonzero(chi2 < cutoff*cutoff*self.D)
             chi2 = chi2[indices]
-            if neighborhood[k] is None:
-                neighborhood[k] = indices
+            if neighborhood_k is None:
+                neighborhood_k = indices
             else:
-                neighborhood[k] = neighborhood[k][indices]
+                neighborhood_k = neighborhood_k[indices]
         
         # prevent tiny negative determinants to mess up
         (sign, logdet) = np.linalg.slogdet(self.covar[k])
 
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k
 
 
     def _M(self, A, M, C, P, n_points, A2=None, M2=None, C2=None, P2=None, n_points2=None):
@@ -244,7 +243,7 @@ class ICGMM(IEMGMM):
             # run E now on data2
             # then combine respective sums in M step
             for k in xrange(self.K):
-                log_p2[k] = self._E(k, data2, neighborhood2, cutoff=cutoff)
+                log_p2[k], neighborhood2[k] = self._E(k, data2, cutoff=cutoff)
                 S2[neighborhood2[k]] += np.exp(log_p2[k])
 
             log_S2 = np.log(S2)
