@@ -49,7 +49,7 @@ class ICGMM(IEMGMM):
         S = np.zeros(len(data)) # S = sum_k p(x|k)
         log_S = np.empty(len(data))
         N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
-        sel = [None for k in xrange(self.K)]
+        neighborhood = [None for k in xrange(self.K)]
         log_p = [[] for k in xrange(self.K)]
 
         # save volumes to see which components change
@@ -75,18 +75,18 @@ class ICGMM(IEMGMM):
             # compute p(i | k) for each k independently
             # need S = sum_k p(i | k) for further calculation
             for k in xrange(self.K):
-                log_p[k] = self._E(k, data, sel, cutoff=cutoff)
-                S[sel[k]] += np.exp(log_p[k])
-                N[sel[k]] = 1
+                log_p[k] = self._E(k, data, neighborhood, cutoff=cutoff)
+                S[neighborhood[k]] += np.exp(log_p[k])
+                N[neighborhood[k]] = 1
                 if self.verbose:
-                    print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[sel[k]]).mean())
+                    print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[neighborhood[k]]).mean())
 
             # since log(0) isn't a good idea, need to restrict to N
             log_S[N] = np.log(S[N])
             logL_ = logL_obs_ = self._logsum(log_S[N])
 
             for k in xrange(self.K):
-                A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, sel[k])
+                A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, neighborhood[k])
 
             if self.verbose:
                 print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
@@ -156,10 +156,10 @@ class ICGMM(IEMGMM):
             V_ = np.linalg.det(self.covar)
             changed = np.flatnonzero((V_- V)/V > 0.25)
             for c in changed:
-                sel[c] = None
+                neighborhood[c] = None
                 V[c] = V_[c]
                 if self.verbose:
-                    print " resetting sel[%d] due to volume change" % c
+                    print " resetting neighborhood[%d] due to volume change" % c
 
             S[:] = 0
             N[:] = 0
@@ -168,31 +168,31 @@ class ICGMM(IEMGMM):
             
     def logL(self, data, cutoff=None):
         S = np.zeros(len(data))
-        sel = [None for k in xrange(self.K)]
+        neighborhood = [None for k in xrange(self.K)]
         for k in xrange(self.K):
             # to minimize the components with tiny p(x|k) in sum:
             # only use those within cutoff
-            log_p_k = self._E(k, data, sel, cutoff=cutoff)
-            S[sel[k]] += np.exp(log_p_k)
+            log_p_k = self._E(k, data, neighborhood, cutoff=cutoff)
+            S[neighborhood[k]] += np.exp(log_p_k)
         return np.log(S)
 
-    def _E(self, k, data, sel, cutoff=None):
+    def _E(self, k, data, neighborhood, cutoff=None):
         # p(x | k) for all x in the vicinity of k
         # determine all points within cutoff sigma from mean[k]
-        if cutoff is None or sel[k] is None:
+        if cutoff is None or neighborhood[k] is None:
             dx = data - self.mean[k]
         else:
-            dx = data[sel[k]] - self.mean[k]
+            dx = data[neighborhood[k]] - self.mean[k]
         chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
         # close to convergence, we can stop applying the cutoff because
-        # changes to sel will be minimal
+        # changes to neighborhood will be minimal
         if cutoff is not None:
             indices = np.flatnonzero(chi2 < cutoff*cutoff*self.D)
             chi2 = chi2[indices]
-            if sel[k] is None:
-                sel[k] = indices
+            if neighborhood[k] is None:
+                neighborhood[k] = indices
             else:
-                sel[k] = sel[k][indices]
+                neighborhood[k] = neighborhood[k][indices]
         
         # prevent tiny negative determinants to mess up
         (sign, logdet) = np.linalg.slogdet(self.covar[k])
@@ -238,41 +238,41 @@ class ICGMM(IEMGMM):
             # are drawn from the model, we can avoid the caution of
             # dealing with outliers: all points will be considered
             S2 = np.zeros(len(data2))
-            sel2 = [None for k in xrange(self.K)]
+            neighborhood2 = [None for k in xrange(self.K)]
             log_p2 = [[] for k in xrange(self.K)]
 
             # run E now on data2
             # then combine respective sums in M step
             for k in xrange(self.K):
-                log_p2[k] = self._E(k, data2, sel2, cutoff=cutoff)
-                S2[sel2[k]] += np.exp(log_p2[k])
+                log_p2[k] = self._E(k, data2, neighborhood2, cutoff=cutoff)
+                S2[neighborhood2[k]] += np.exp(log_p2[k])
 
             log_S2 = np.log(S2)
             logL2_ = self._logsum(log_S2)
             n_impute = len(data2)
 
             for k in xrange(self.K):
-                # with small imputation sets: sel2[k] might be empty
-                if sel2[k] is None or sel2[k].size:
-                    A2[k], M2[k], C2[k], P2[k] = self._computeMSums(k, data2, log_p2[k], log_S2, sel2[k])
+                # with small imputation sets: neighborhood2[k] might be empty
+                if neighborhood2[k] is None or neighborhood2[k].size:
+                    A2[k], M2[k], C2[k], P2[k] = self._computeMSums(k, data2, log_p2[k], log_S2, neighborhood2[k])
         return A2, M2, C2, P2, logL2_, n_impute
 
 
-    def _computeMSums(self, k, data, log_p_k, log_S, sel_k):
+    def _computeMSums(self, k, data, log_p_k, log_S, neighborhood_k):
         # needed for imputation correction: P_k = sum_i p_ik
         P_k = np.exp(self._logsum(log_p_k))
             
-        # reshape needed when sel_k is None because of its implicit meaning
+        # reshape needed when neighborhood_k is None because of its implicit meaning
         # as np.newaxis (which would create a 2D array)
         # NOTE: this modifies log_q_k in place!
-        log_p_k -= log_S[sel_k].reshape(log_p_k.size)
+        log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
 
         # amplitude: A_k = sum_i q_ik
         A_k = np.exp(self._logsum(log_p_k))
 
         # mean: M_k = sum_i x_i q_ik
         qk = np.exp(log_p_k)
-        d = data[sel_k].reshape((log_p_k.size, self.D))
+        d = data[neighborhood_k].reshape((log_p_k.size, self.D))
         M_k = (d * qk[:,None]).sum(axis=0)
 
         # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
