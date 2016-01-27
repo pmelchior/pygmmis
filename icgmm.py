@@ -105,7 +105,7 @@ class ICGMM(IEMGMM):
 
                 if pool is None:
                     for rd in xrange(RDs):
-                        A2_, M2_, C2_, P2_, logL2_, n_impute_ = self._computeIMSums(sel_callback, len(data), n_missing, n_guess, cutoff)
+                        A2_, M2_, C2_, P2_, logL2_, n_impute_ = self._computeIMSums(sel_callback, len(data), n_missing, n_guess, cutoff, seed=it*rd)
                         A2 += A2_
                         M2 += M2_
                         C2 += C2_
@@ -113,7 +113,7 @@ class ICGMM(IEMGMM):
                         logL2 += logL2_
                         n_impute += n_impute_
                 else:
-                    results = [pool.apply_async(self._computeIMSums, (sel_callback, len(data), n_missing, n_guess, cutoff)) for rd in xrange(RDs)]
+                    results = [pool.apply_async(self._computeIMSums, (sel_callback, len(data), n_missing, n_guess, cutoff, it*rd)) for rd in xrange(RDs)]
                     for r in results:
                         A2_, M2_, C2_, P2_, logL2_, n_impute_ = r.get()
                         A2 += A2_
@@ -220,7 +220,10 @@ class ICGMM(IEMGMM):
         else:
             self.covar[:,:,:] = C / A[:,None,None]
 
-    def _computeIMSums(self, sel_callback, len_data, n_missing, n_guess, cutoff):
+    def _computeIMSums(self, sel_callback, len_data, n_missing, n_guess, cutoff, seed=None):
+        # for parallel draws from rng
+        self.rng.seed(seed)
+            
         # create imputated data
         data2 = self._I(sel_callback, len_data, n_missing=n_missing, n_guess=n_guess)
         A2 = np.zeros(self.K)
