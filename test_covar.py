@@ -9,13 +9,13 @@ from functools import partial
 from multiprocessing import Pool
 
 
-def plotResults(data, sel, gmm, patch=None):
+def plotResults(orig, data, gmm, patch=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
     # plot inner and outer points
-    ax.plot(data[:,0][sel], data[:,1][sel], 'bo', mec='None')
-    ax.plot(data[:,0][sel==False], data[:,1][sel==False], 'o', mfc='None', mec='b')
+    ax.plot(orig[:,0], orig[:,1], 'bo', mec='None')
+    ax.plot(data[:,0], data[:,1], 'o', mfc='None', mec='b')
 
     # prediction
     B = 100
@@ -40,7 +40,7 @@ def plotResults(data, sel, gmm, patch=None):
             ax.add_artist(copy.copy(patch))
 
     # add complete data logL to plot
-    logL = gmm.logL(data).mean()
+    logL = gmm.logL(orig).mean()
     ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
     
     ax.set_xlim(-5, 15)
@@ -107,38 +107,22 @@ if __name__ == '__main__':
     R = 10
 
     # limit data to within the box
-    cb = getBoxWithHole
-    ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
-          patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
-    #cb = getBox
-    #ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
-    #cb = getHole
-    #ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
-    #cb = partial(getTaperedDensity, rng=rng)
-    #ps = None
-    #cb = getCut
-    #from matplotlib.path import Path
-    #path = Path([(5,-5), (5,15)], [Path.MOVETO, Path.LINETO])
-    #ps = patches.PathPatch(path, fc="none", ec='b', ls='dotted')
+    cb = getHole#BoxWithHole
+    ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+    #[patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
+    # patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')#]
 
-    sel = cb(orig)
-    data = orig[sel]
-
-    """
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, rng=rng, verbose=False)
-    plotResults(orig, sel, new_gmm, patch=ps)
-
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
-    plotResults(orig, sel, new_gmm, patch=ps)
+    # add isotropic errors on data
+    disp = 0.5
+    noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
+    sel = cb(noisy)
+    data = noisy[sel]
+    covar = np.tile(disp**2 * np.eye(D), (len(data), 1, 1))
     
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=False, rng=rng, pool=pool)
-    plotResults(orig, sel, new_gmm, patch=ps)
-
-    """
     # repeated runs: store results and logL
     imp = iemgmm.GMM(K=K*R, D=D)
 
-    # 1) IEMGMM without imputation
+    # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
@@ -149,30 +133,43 @@ if __name__ == '__main__':
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, sel, imp, patch=ps)
+    plotResults(orig, data, imp, patch=ps)
 
-    # 2) IEMGMM with imputation and unknown n_missing
+    # 2) IEMGMM without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, verbose=verbose)
+        imp_ = iemgmm.IEMGMM(data, covar=covar, K=K, w=0.1, cutoff=5, rng=rng, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, sel, imp, patch=ps)
+    plotResults(orig, data, imp, patch=ps)
 
-    # 3) same with worker pool
+    # 3) IEMGMM with imputation, igoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=verbose)
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, rng=rng, pool=pool, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, sel, imp, patch=ps)
+    plotResults(orig, data, imp, patch=ps)
+    
+    # 4) IEMGMM with imputation, incorporating errors
+    start = datetime.datetime.now()
+    rng = RandomState(seed)
+    for r in xrange(R):
+        imp_ = iemgmm.IEMGMM(data, covar=covar, K=K, w=0.1, cutoff=5, sel_callback=cb, rng=rng, pool=pool, verbose=verbose)
+        ll = imp_.logL(data).mean()
+        imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
+        imp.mean[r*K:(r+1)*K,:] = imp_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+    imp.amp /= imp.amp.sum()
+    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    plotResults(orig, data, imp, patch=ps)
