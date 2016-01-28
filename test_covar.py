@@ -107,10 +107,8 @@ if __name__ == '__main__':
     R = 10
 
     # limit data to within the box
-    cb = getHole#BoxWithHole
+    cb = getHole
     ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
-    #[patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
-    # patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')#]
 
     # add isotropic errors on data
     disp = 0.5
