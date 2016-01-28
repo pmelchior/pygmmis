@@ -51,6 +51,7 @@ class ICGMM(IEMGMM):
         N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
         neighborhood = [None for k in xrange(self.K)]
         log_p = [[] for k in xrange(self.K)]
+        T_inv = [None for k in xrange(self.K)]
 
         # save volumes to see which components change
         V = np.linalg.det(self.covar)
@@ -75,7 +76,7 @@ class ICGMM(IEMGMM):
             # compute p(i | k) for each k independently
             # need S = sum_k p(i | k) for further calculation
             for k in xrange(self.K):
-                log_p[k], neighborhood[k] = self._E(k, data, covar=covar, neighborhood_k=neighborhood[k], cutoff=cutoff)
+                log_p[k], neighborhood[k], T_inv[k] = self._E(k, data, covar=covar, neighborhood_k=neighborhood[k], cutoff=cutoff)
                 S[neighborhood[k]] += np.exp(log_p[k])
                 N[neighborhood[k]] = 1
                 if self.verbose:
@@ -86,7 +87,7 @@ class ICGMM(IEMGMM):
             logL_ = logL_obs_ = self._logsum(log_S[N])
 
             for k in xrange(self.K):
-                A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, neighborhood[k])
+                A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, neighborhood[k], T_inv_k=T_inv[k])
 
             if self.verbose:
                 print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
@@ -171,7 +172,7 @@ class ICGMM(IEMGMM):
         for k in xrange(self.K):
             # to minimize the components with tiny p(x|k) in sum:
             # only use those within cutoff
-            log_p_k, neighborhood_k = self._E(k, data, covar=covar, cutoff=cutoff)
+            log_p_k, neighborhood_k, _ = self._E(k, data, covar=covar, cutoff=cutoff)
             S[neighborhood_k] += np.exp(log_p_k)
         return np.log(S)
 
@@ -182,12 +183,23 @@ class ICGMM(IEMGMM):
             dx = data - self.mean[k]
         else:
             dx = data[neighborhood_k] - self.mean[k]
-        chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
-        # close to convergence, we can stop applying the cutoff because
+
+        if covar is None:
+             T_inv_k = None
+             chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(self.covar[k]), dx)
+        else:
+            # with data errors: need to create and return T_ik = covar_i + C_k
+            # and weight each datum appropriately
+            T_inv_k = np.linalg.inv(self.covar[k] + covar[neighborhood_k].reshape(len(dx), self.D, self.D))
+            chi2 = np.einsum('...i,...ij,...j', dx, T_inv_k, dx)
+
+        # NOTE: close to convergence, we can stop applying the cutoff because
         # changes to neighborhood will be minimal
         if cutoff is not None:
             indices = np.flatnonzero(chi2 < cutoff*cutoff*self.D)
             chi2 = chi2[indices]
+            if covar is not None:
+                T_inv_k = T_inv_k[indices]
             if neighborhood_k is None:
                 neighborhood_k = indices
             else:
@@ -197,7 +209,7 @@ class ICGMM(IEMGMM):
         (sign, logdet) = np.linalg.slogdet(self.covar[k])
 
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k
+        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
 
 
     def _M(self, A, M, C, P, n_points, A2=None, M2=None, C2=None, P2=None, n_points2=None):
@@ -243,7 +255,7 @@ class ICGMM(IEMGMM):
             # run E now on data2
             # then combine respective sums in M step
             for k in xrange(self.K):
-                log_p2[k], neighborhood2[k] = self._E(k, data2, cutoff=cutoff)
+                log_p2[k], neighborhood2[k], _ = self._E(k, data2, cutoff=cutoff)
                 S2[neighborhood2[k]] += np.exp(log_p2[k])
 
             log_S2 = np.log(S2)
@@ -257,28 +269,45 @@ class ICGMM(IEMGMM):
         return A2, M2, C2, P2, logL2_, n_impute
 
 
-    def _computeMSums(self, k, data, log_p_k, log_S, neighborhood_k):
+    def _computeMSums(self, k, data, log_p_k, log_S, neighborhood_k, T_inv_k=None):
         # needed for imputation correction: P_k = sum_i p_ik
         P_k = np.exp(self._logsum(log_p_k))
-            
-        # reshape needed when neighborhood_k is None because of its implicit meaning
-        # as np.newaxis (which would create a 2D array)
-        # NOTE: this modifies log_q_k in place!
+
+        # form log_q_ik by dividing with S = sum_k p_ik
+        # NOTE:  this modifies log_p_k in place!
+        # NOTE2: reshape needed when neighborhood_k is None because of its
+        # mpliciti meaning as np.newaxis (which would create a 2D array)
         log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
 
         # amplitude: A_k = sum_i q_ik
         A_k = np.exp(self._logsum(log_p_k))
 
-        # mean: M_k = sum_i x_i q_ik
+        # in fact: q_ik, but we treat sample index i silently everywhere
         qk = np.exp(log_p_k)
+        
+        # data with errors?
         d = data[neighborhood_k].reshape((log_p_k.size, self.D))
-        M_k = (d * qk[:,None]).sum(axis=0)
+        if T_inv_k is None:
+            # mean: M_k = sum_i x_i q_ik
+            M_k = (d * qk[:,None]).sum(axis=0)
 
-        # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
-        d_m = d - self.mean[k]
-        # funny way of saying: for each point i, do the outer product
-        # of d_m with its transpose, multiply with pi[i], and sum over i
-        C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+            # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
+            d_m = d - self.mean[k]
+            # funny way of saying: for each point i, do the outer product
+            # of d_m with its transpose, multiply with pi[i], and sum over i
+            C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+        else:
+            # need temporary variables:
+            # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
+            # B_ik = C_k - C_k T_ik^-1 C_k
+            # to replace pure data-driven means and covariances
+            d_m = d - self.mean[k]
+            b_k = self.mean[k] + np.einsum('ij,...jk,...k', self.covar[k], T_inv_k, d_m)
+            M_k = (b_k * qk[:,None]).sum(axis=0)
+
+            b_k -= self.mean[k]
+            B_k = self.covar[k] - np.einsum('ij,...jk,...kl', self.covar[k], T_inv_k, self.covar[k])
+            C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
         return A_k, M_k, C_k, P_k
         
 
