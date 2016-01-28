@@ -1,6 +1,6 @@
 #!/bin/env python
 
-import iemgmm, icgmm
+import iemgmm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -124,25 +124,25 @@ if __name__ == '__main__':
     data = orig[sel]
 
     """
-    new_gmm = icgmm.ICGMM(data, K=K, cutoff=10, w=0.1, rng=rng, verbose=False)
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, rng=rng, verbose=False)
     plotResults(orig, sel, new_gmm, patch=ps)
 
-    new_gmm = icgmm.ICGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
     
-    new_gmm = icgmm.ICGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=False, rng=rng, pool=pool)
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=False, rng=rng, pool=pool)
     plotResults(orig, sel, new_gmm, patch=ps)
-    """
 
+    """
     # repeated runs: store results and logL
     imp = iemgmm.GMM(K=K*R, D=D)
     ll = np.empty(R)
     
-    # 1) ICGMM with imputation and unknown n_missing
+    # 1) IEMGMM with imputation and unknown n_missing
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = icgmm.ICGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
         ll[r] = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = icgmm.ICGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=False)
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=False)
         ll[r] = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
