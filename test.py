@@ -4,6 +4,10 @@ import iemgmm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import datetime
+from functools import partial
+from multiprocessing import Pool
+
 
 def plotResults(data, sel, gmm, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -20,7 +24,6 @@ def plotResults(data, sel, gmm, patch=None):
 
     # compute sum_k(p_k(x)) for all x
     logL_i = gmm.logL(coords)
-    
     # for better visibility use arcshinh stretch
     p = np.arcsinh(np.exp(logL_i.reshape((B,B)))/1e-4)
     cs = ax.contourf(p, 10, extent=(-5,15,-5,15), cmap=plt.cm.Greys)
@@ -58,120 +61,133 @@ def getHole(coords):
 def getBoxWithHole(coords):
     return getBox(coords)*getHole(coords)
 
-def getHalfDensity(coords):
+def getHalfDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
-    mask[np.random.random(coords.shape[0]) < 0.9] = 0
+    mask[rng.rand(coords.shape[0]) < 0.5] = 0
     return mask
 
-def getTaperedDensity(coords):
+def getTaperedDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
-    mask[np.random.random(coords.shape[0]) < coords[:,0]/10] = 0
+    mask[rng.rand(coords.shape[0]) < coords[:,0]/7] = 0
     return mask
 
-
-# set up RNG
-seed = 42
-from numpy.random import RandomState
-rng = RandomState(seed)
-
-# draw N points from 3-component GMM
-N = 400
-D = 2
-gmm = iemgmm.GMM(K=3, D=2, rng=rng)
-gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
-gmm.amp /= gmm.amp.sum()
-gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
-                          [ 0.70306351,  0.6709532 ],
-                          [ 0.01087670,  0.852077]])*10
-gmm.covar[:,:,:] = np.array([[[ 0.08530014, -0.00314178],
-                              [-0.00314178,  0.00541106]],
-                             [[ 0.03053402, 0.0125736],
-                              [0.0125736,  0.01075791]],
-                             [[ 0.00258605,  0.00409287],
-                             [ 0.00409287,  0.01065186]]])*100
-orig = gmm.draw(N)
-
-# define selection
-"""
-cb = getHole
-ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted', lw=1)
-"""
-"""
-cb = getBox
-ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
-"""
-
-cb = getBoxWithHole
-ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
-      patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
-
-"""
-cb = getTaperedDensity
-ps = None
-"""
-
-# limit data to within the box
-sel = cb(orig)
-data = orig[sel]
-
-# fit the data set
-K = 3
-R = 10
-
-# 1) fit without imputation
-no_imp = iemgmm.GMM(K=K*R, D=D)
-ll = np.empty(R)
-rng = RandomState(seed) # reset the rng for comparable results
-for r in xrange(R):
-    no_imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, rng=rng, verbose=False)
-    ll[r] = no_imp_.logL(data).mean()
-    no_imp.amp[r*K:(r+1)*K] = no_imp_.amp
-    no_imp.mean[r*K:(r+1)*K,:] = no_imp_.mean
-    no_imp.covar[r*K:(r+1)*K,:,:] = no_imp_.covar
-no_imp.amp /= no_imp.amp.sum()
-plotResults(orig, sel, no_imp, patch=ps)
-
-# weight resulting models with their respective likelihood
-for r in xrange(R):
-    no_imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
-no_imp.amp /= no_imp.amp.sum()
-plotResults(orig, sel, no_imp, patch=ps)
-
-"""
-# 2) same with imputation
-imp = iemgmm.GMM(K=K*R, D=D)
-rng = RandomState(seed) # reset the rng for comparable results
-for r in xrange(R):
-    imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, sel_callback=cb, n_missing=(sel==False).sum(), rng=rng, verbose=False)
-    ll[r] = imp_.logL(data).mean()
-    imp.amp[r*K:(r+1)*K] = imp_.amp
-    imp.mean[r*K:(r+1)*K,:] = imp_.mean
-    imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
-imp.amp /= imp.amp.sum()
-plotResults(orig, sel, imp, patch=ps)
-
-for r in xrange(R):
-    imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
-imp.amp /= imp.amp.sum()
-plotResults(orig, sel, imp, patch=ps)
+def getCut(coords):
+    return (coords[:,0] < 5)
 
 
-# 3) same with imputation, but without knowing how many points are missing
-imp2 = iemgmm.GMM(K=K*R, D=D)
-rng = RandomState(seed) # reset the rng for comparable results
-for r in xrange(R):
-    imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
-    ll[r] = imp_.logL(data).mean()
-    imp2.amp[r*K:(r+1)*K] = imp_.amp
-    imp2.mean[r*K:(r+1)*K,:] = imp_.mean
-    imp2.covar[r*K:(r+1)*K,:,:] = imp_.covar
-imp2.amp /= imp2.amp.sum()
-plotResults(orig, sel, imp2, patch=ps)
 
-for r in xrange(R):
-    imp2.amp[r*K:(r+1)*K] *= np.exp(ll[r])
-imp2.amp /= imp2.amp.sum()
-plotResults(orig, sel, imp2, patch=ps)
-"""
+if __name__ == '__main__':
 
+    # set up RNG and worker pool
+    seed = 42
+    from numpy.random import RandomState
+    rng = RandomState(seed)
+    pool = Pool(processes=2)
 
+    # draw N points from 3-component GMM
+    N = 400
+    D = 2
+    gmm = iemgmm.GMM(K=3, D=2, rng=rng)
+    gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
+    gmm.amp /= gmm.amp.sum()
+    gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
+                              [ 0.70306351,  0.6709532 ],
+                              [ 0.01087670,  0.852077]])*10
+    gmm.covar[:,:,:] = np.array([[[ 0.08530014, -0.00314178],
+                                  [-0.00314178,  0.00541106]],
+                                 [[ 0.03053402, 0.0125736],
+                                  [0.0125736,  0.01075791]],
+                                 [[ 0.00258605,  0.00409287],
+                                 [ 0.00409287,  0.01065186]]])*100
+
+    orig = gmm.draw(N)
+
+    K = 3
+    R = 10
+
+    # limit data to within the box
+    cb = getBoxWithHole
+    ps = [patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted'),
+          patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')]
+    #cb = getBox
+    #ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
+    #cb = getHole
+    #ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+    #cb = partial(getTaperedDensity, rng=rng)
+    #ps = None
+    #cb = getCut
+    #from matplotlib.path import Path
+    #path = Path([(5,-5), (5,15)], [Path.MOVETO, Path.LINETO])
+    #ps = patches.PathPatch(path, fc="none", ec='b', ls='dotted')
+
+    sel = cb(orig)
+    data = orig[sel]
+
+    """
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, rng=rng, verbose=False)
+    plotResults(orig, sel, new_gmm, patch=ps)
+
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
+    plotResults(orig, sel, new_gmm, patch=ps)
+    
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=False, rng=rng, pool=pool)
+    plotResults(orig, sel, new_gmm, patch=ps)
+
+    """
+    # repeated runs: store results and logL
+    imp = iemgmm.GMM(K=K*R, D=D)
+    ll = np.empty(R)
+
+    # 1) IEMGMM without imputation
+    start = datetime.datetime.now()
+    rng = RandomState(seed)
+    for r in xrange(R):
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, rng=rng, verbose=False)
+        ll[r] = imp_.logL(data).mean()
+        imp.amp[r*K:(r+1)*K] = imp_.amp
+        imp.mean[r*K:(r+1)*K,:] = imp_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+    imp.amp /= imp.amp.sum()
+    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    plotResults(orig, sel, imp, patch=ps)
+
+    for r in xrange(R):
+        imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+    imp.amp /= imp.amp.sum()
+    plotResults(orig, sel, imp, patch=ps)
+    
+    # 1) IEMGMM with imputation and unknown n_missing
+    start = datetime.datetime.now()
+    rng = RandomState(seed)
+    for r in xrange(R):
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, verbose=False)
+        ll[r] = imp_.logL(data).mean()
+        imp.amp[r*K:(r+1)*K] = imp_.amp
+        imp.mean[r*K:(r+1)*K,:] = imp_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+    imp.amp /= imp.amp.sum()
+    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    plotResults(orig, sel, imp, patch=ps)
+
+    for r in xrange(R):
+        imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+    imp.amp /= imp.amp.sum()
+    plotResults(orig, sel, imp, patch=ps)
+
+    # 2) same with worker pool
+    start = datetime.datetime.now()
+    rng = RandomState(seed)
+    for r in xrange(R):
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=False)
+        ll[r] = imp_.logL(data).mean()
+        imp.amp[r*K:(r+1)*K] = imp_.amp
+        imp.mean[r*K:(r+1)*K,:] = imp_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+    imp.amp /= imp.amp.sum()
+    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    plotResults(orig, sel, imp, patch=ps)
+
+    for r in xrange(R):
+        imp.amp[r*K:(r+1)*K] *= np.exp(ll[r])
+    imp.amp /= imp.amp.sum()
+    plotResults(orig, sel, imp, patch=ps)
