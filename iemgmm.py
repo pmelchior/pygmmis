@@ -186,7 +186,7 @@ class IEMGMM(GMM):
                 S[neighborhood[k]] += np.exp(log_p[k])
                 N[neighborhood[k]] = 1
                 if self.verbose:
-                    print "  k = %d: |I| = %d <S> = %.3f" % (k, log_p[k].size, np.log(S[neighborhood[k]]).mean())
+                    print "  k=%d: amp=%.3f pos=(%.1f, %.1f) s=%.2f |I| = %d <S> = %.3f" % (k, self.amp[k], self.mean[k][0], self.mean[k][1], np.linalg.det(self.covar[k])**(0.5/self.D), log_p[k].size, np.log(S[neighborhood[k]]).mean())
 
             # since log(0) isn't a good idea, need to restrict to N
             log_S[N] = np.log(S[N])
@@ -245,8 +245,8 @@ class IEMGMM(GMM):
 
                     if self.verbose:
                         print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
-                elif self.verbose:
-                    print  ""
+            if self.verbose:
+                print  ""
                 
             # convergence test:
             if it > 5 and logL_ - logL < tol and logL_obs_ < logL_obs:
@@ -335,7 +335,13 @@ class IEMGMM(GMM):
         self.amp[:] = A / n_points
         self.mean[:,:] = M / A[:,None]
         if self.w > 0:
-            self.covar[:,:,:] = (C + (self.w*np.eye(self.D))[None,:,:]) / (A + 1)[:,None,None]
+            # we assume w to be a lower bound of the isotropic dispersion,
+            # C_k = w^2 I + ...
+            # then eq. 38 in Bovy et al. only ~works for N = 0 because of the
+            # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
+            # On average, q_j = N/K, so we'll adopt that to correct.
+            w_eff = self.w**2 * (n_points*1./self.K + 1)
+            self.covar[:,:,:] = (C + w_eff*np.eye(self.D)[None,:,:]) / (A + 1)[:,None,None]
         else:
             self.covar[:,:,:] = C / A[:,None,None]
 
@@ -380,7 +386,9 @@ class IEMGMM(GMM):
         M2 = np.zeros((self.K, self.D))
         C2 = np.zeros((self.K, self.D, self.D))
         P2 = np.zeros(self.K)
-        
+        logL2 = 0
+        n_impute = len(data2)
+
         if len(data2):
             # similar setup as above, but since imputated points
             # are drawn from the model, we can avoid the caution of
@@ -396,14 +404,13 @@ class IEMGMM(GMM):
                 S2[neighborhood2[k]] += np.exp(log_p2[k])
 
             log_S2 = np.log(S2)
-            logL2_ = self._logsum(log_S2)
-            n_impute = len(data2)
+            logL2 = self._logsum(log_S2)
 
             for k in xrange(self.K):
                 # with small imputation sets: neighborhood2[k] might be empty
                 if neighborhood2[k] is None or neighborhood2[k].size:
                     A2[k], M2[k], C2[k], P2[k] = self._computeMSums(k, data2, log_p2[k], log_S2, neighborhood2[k])
-        return A2, M2, C2, P2, logL2_, n_impute
+        return A2, M2, C2, P2, logL2, n_impute
 
 
     def _computeMSums(self, k, data, log_p_k, log_S, neighborhood_k, T_inv_k=None):
