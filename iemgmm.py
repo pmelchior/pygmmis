@@ -135,7 +135,7 @@ class GMM(object):
 
 class IEMGMM(GMM):
 
-    def __init__(self, data, covar=None, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, verbose=False):
+    def __init__(self, data, covar=None, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, logfile=None, verbose=False):
         GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
 
         self.w = w
@@ -143,10 +143,10 @@ class IEMGMM(GMM):
             self.amp, self.mean, self.covar = init_callback(K)
         else:
             self._initializeModel(K, s, data)
-        self._run_EM(data, covar=covar, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool)
+        self._run_EM(data, covar=covar, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool, logfile=logfile)
 
     # no imputation for now
-    def _run_EM(self, data, covar=None, cutoff=None, sel_callback=None, n_missing=None, pool=None, tol=1e-3):
+    def _run_EM(self, data, covar=None, cutoff=None, sel_callback=None, n_missing=None, pool=None, logfile=None, tol=1e-3):
         maxiter = 100
 
         # sum_k p(x|k) -> S
@@ -177,6 +177,9 @@ class IEMGMM(GMM):
         logL_obs = None
         n_impute = None
         n_guess = None
+
+        if logfile is not None:
+            logfile = open(logfile, "w")
         while it < maxiter: # limit loop in case of no convergence
 
             # compute p(i | k) for each k independently
@@ -237,7 +240,8 @@ class IEMGMM(GMM):
                     C2 *= soften / RDs
                     P2 *= soften / RDs
                     logL2 /= RDs
-                    logL_ += logL2 + np.log(soften)
+                    logL2 += np.log(soften)
+                    logL_ += logL2
                     n_impute = n_impute * soften / RDs
 
                     # update n_guess with <n_impute>
@@ -247,6 +251,16 @@ class IEMGMM(GMM):
                         print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
             if self.verbose:
                 print  ""
+
+            if logfile is not None:
+                # create dummies when there was no imputation
+                if sel_callback is None:
+                    logL2 = soften = n_impute = -1
+                    P2 = np.ones_like(P)
+                logfile.write("%d\t%.3f\t%.3f\t%.3f\t%.3f\t%.6f\t" % (it, logL_obs_, logL2, logL_, soften, n_impute))
+                for k in xrange(self.K):
+                    logfile.write("%.3f\t%.2f\t%.3f\t%.3f\t%.3f\t" % (self.amp[k], np.linalg.det(self.covar[k])**(0.5/self.D), np.log(P[k]) - np.log(self.amp[k]), np.log(P2[k]) - np.log(self.amp[k]), np.log(P[k]) + np.log(P2[k])))
+                logfile.write("\n")
 
             # convergence test:
             if it > 5 and logL_ - logL < tol and logL_obs_ < logL_obs:
@@ -271,7 +285,8 @@ class IEMGMM(GMM):
             S[:] = 0
             N[:] = 0
             it += 1
-
+        if logfile is not None:
+            logfile.close()
 
     def logL(self, data, covar=None, cutoff=None):
         S = np.zeros(len(data))
