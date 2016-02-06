@@ -38,7 +38,7 @@ class GMM(object):
         self.amp = np.zeros((K))
         self.mean = np.empty((K,D))
         self.covar = np.empty((K,D,D))
-            
+
     @property
     def K(self):
         return self.amp.size
@@ -92,11 +92,11 @@ class GMM(object):
                 samples = np.concatenate((samples[sel_], ssamples))
         return samples
 
-    def logL(self, data):
+    def logL(self, data, covar=None):
         log_p = self._E(data)
-        return self._logsum(log_p.T)
+        return self._logsum(log_p.T, covar=covar)
 
-    def _E(self, data):
+    def _E(self, data, covar=None):
         # compute p(x | k)
         # NOTE: normally the E step computes the fractional probability
         # p (x | k) / (sum_k p(x | k))
@@ -106,9 +106,14 @@ class GMM(object):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         for k in xrange(self.K):
             dx = data - self.mean[k]
-            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
-            # prevent tiny negative determinants to mess up
-            (sign, logdet) = np.linalg.slogdet(self.covar[k])
+            if covar is None:
+                chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
+                # prevent tiny negative determinants to mess up
+                (sign, logdet) = np.linalg.slogdet(self.covar[k])
+            else:
+                T_k = self.covar[k] + covar
+                chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(T_k), dx)
+                (sign, logdet) = np.linalg.slogdet(T_k)
             log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
         return log_p
 
@@ -137,14 +142,14 @@ class IEMGMM(GMM):
 
     def __init__(self, data, covar=None, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, verbose=False):
         GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
-        
+
         self.w = w
         if init_callback is not None:
             self.amp, self.mean, self.covar = init_callback(K)
         else:
             self._initializeModel(K, s, data)
         self._run_EM(data, covar=covar, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool)
-            
+
     # no imputation for now
     def _run_EM(self, data, covar=None, cutoff=None, sel_callback=None, n_missing=None, pool=None, tol=1e-3):
         maxiter = 100
@@ -167,7 +172,7 @@ class IEMGMM(GMM):
         M = np.empty((self.K, self.D))
         C = np.empty((self.K, self.D, self.D))
         P = np.empty(self.K)
-        
+
         # same for imputed data: set below if needed
         A2 = M2 = C2 = P2 = None
 
@@ -247,7 +252,7 @@ class IEMGMM(GMM):
                         print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
             if self.verbose:
                 print  ""
-                
+
             # convergence test:
             if it > 5 and logL_ - logL < tol and logL_obs_ < logL_obs:
                 break
@@ -272,7 +277,7 @@ class IEMGMM(GMM):
             N[:] = 0
             it += 1
 
-            
+
     def logL(self, data, covar=None, cutoff=None):
         S = np.zeros(len(data))
         for k in xrange(self.K):
@@ -310,7 +315,7 @@ class IEMGMM(GMM):
                 neighborhood_k = indices
             else:
                 neighborhood_k = neighborhood_k[indices]
-        
+
         # prevent tiny negative determinants to mess up
         (sign, logdet) = np.linalg.slogdet(self.covar[k])
 
@@ -352,7 +357,7 @@ class IEMGMM(GMM):
         else:
             if len_data is None:
                 raise RuntimeError("I: need len_data when n_missing is None!")
-            
+
             # confidence interval for Poisson variate len_data
             from scipy.stats import chi2
             lower = 0.5*chi2.ppf(alpha/2, 2*len_data)
@@ -379,7 +384,7 @@ class IEMGMM(GMM):
     def _computeIMSums(self, sel_callback, len_data, n_missing, n_guess, cutoff, seed=None):
         # for parallel draws from rng
         self.rng.seed(seed)
-            
+
         # create imputated data
         data2 = self._I(sel_callback, len_data, n_missing=n_missing, n_guess=n_guess)
         A2 = np.zeros(self.K)
@@ -428,7 +433,7 @@ class IEMGMM(GMM):
 
         # in fact: q_ik, but we treat sample index i silently everywhere
         qk = np.exp(log_p_k)
-        
+
         # data with errors?
         d = data[neighborhood_k].reshape((log_p_k.size, self.D))
         if T_inv_k is None:
@@ -453,7 +458,7 @@ class IEMGMM(GMM):
             B_k = self.covar[k] - np.einsum('ij,...jk,...kl', self.covar[k], T_inv_k, self.covar[k])
             C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
         return A_k, M_k, C_k, P_k
-        
+
 
     def _logsum(self, l):
         """Computes log of a sum, given the log of the elements.
@@ -492,6 +497,3 @@ class IEMGMM(GMM):
             if self.verbose:
                 print "initializing spheres with s=%.2f" % s
         self.covar[:,:,:] = np.tile(s**2 * np.eye(self.D), (self.K,1,1))
-
-
-
