@@ -93,40 +93,50 @@ class GMM(object):
         return samples
 
     def logL(self, data, covar=None):
-        log_p = self._E(data)
-        return self._logsum(log_p.T, covar=covar)
-
-    def _E(self, data, covar=None):
-        # compute p(x | k)
-        # NOTE: normally the E step computes the fractional probability
-        # p (x | k) / (sum_k p(x | k))
-        # We defer this to the M step because we need the proper probs
-        # for per-point likelihoods in some cases.
-        log_p = np.empty((data.shape[0], self.K))
-        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        for k in xrange(self.K):
-            dx = data - self.mean[k]
-            if covar is None:
-                chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
-                # prevent tiny negative determinants to mess up
-                (sign, logdet) = np.linalg.slogdet(self.covar[k])
-            else:
-                T_k = self.covar[k] + covar
-                chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(T_k), dx)
-                (sign, logdet) = np.linalg.slogdet(T_k)
-            log_p[:,k] = np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
-        return log_p
-
-    def _logsum(self, ll):
-        """Computes log of sum of likelihoods for GMM components.
-
-        This method tries hard to avoid over- or underflow that may arise
-        when computing exp(log(p(x | k)).
+        """Log-likelihood of data given all (i.e. the sum of) GMM components
 
         See appendix A of Bovy, Hogg, Roweis (2009).
 
+        If covar is set, the data error will be incorporated, eq. 9, resulting
+        in log(sum_k(p(y | k))). Otherwise this method return log(sum_k(p(x | k)))
+        of the truth values.
+
         Args:
-        ll: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
+            data:   (D,) or (N, D) test coordinates
+            covar:  (D, D) or (N, D, D) covariance matrix of data
+
+        Returns:
+            (1,) or (N, 1) log(L), depending on shape of data
+        """
+
+        log_p = np.empty((self.K, len(data)))
+        for k in xrange(self.K):
+            log_p[k,:] = self.logL_k(k, data, covar=covar)
+        return GMM.logsumLogL(log_p) # sum over all k
+
+    def logL_k(self, k, data, covar=None):
+        # compute p(x | k)
+        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
+        dx = data - self.mean[k]
+        if covar is None:
+            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
+            # prevent tiny negative determinants to mess up
+            (sign, logdet) = np.linalg.slogdet(self.covar[k])
+        else:
+            T_k = self.covar[k] + covar
+            chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(T_k), dx)
+            (sign, logdet) = np.linalg.slogdet(T_k)
+        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+
+    @staticmethod
+    def logsumLogX(logX):
+        """Computes log of the sum given the log of the summands.
+
+        This method tries hard to avoid over- or underflow.
+        See appendix A of Bovy, Hogg, Roweis (2009).
+
+        Args:
+        logX: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
 
         Returns:
         (N, 1) of log of total likelihood
