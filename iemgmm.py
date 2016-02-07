@@ -34,7 +34,6 @@ class GMM(object):
             self.rng = rng
         self.verbose = verbose
 
-        self.D = D
         self.amp = np.zeros((K))
         self.mean = np.empty((K,D))
         self.covar = np.empty((K,D,D))
@@ -42,6 +41,10 @@ class GMM(object):
     @property
     def K(self):
         return self.amp.size
+
+    @property
+    def D(self):
+        return self.mean.shape[1]
 
     def save(self, filename, **kwargs):
         """Save GMM to file.
@@ -112,7 +115,7 @@ class GMM(object):
         log_p = np.empty((self.K, len(data)))
         for k in xrange(self.K):
             log_p[k,:] = self.logL_k(k, data, covar=covar)
-        return GMM.logsumLogL(log_p) # sum over all k
+        return GMM.logsumLogX(log_p) # sum over all k
 
     def logL_k(self, k, data, covar=None):
         # compute p(x | k)
@@ -142,11 +145,11 @@ class GMM(object):
         (N, 1) of log of total likelihood
 
         """
-        floatinfo = np.finfo(ll.dtype)
-        underflow = np.log(floatinfo.tiny) - ll.min(axis=0)
-        overflow = np.log(floatinfo.max) - ll.max(axis=0) - np.log(ll.shape[0])
+        floatinfo = np.finfo(logX.dtype)
+        underflow = np.log(floatinfo.tiny) - logX.min(axis=0)
+        overflow = np.log(floatinfo.max) - logX.max(axis=0) - np.log(logX.shape[0])
         c = np.where(underflow < overflow, underflow, overflow)
-        return np.log(np.exp(ll + c).sum(axis=0)) - c
+        return np.log(np.exp(logX + c).sum(axis=0)) - c
 
 class IEMGMM(GMM):
 
