@@ -42,7 +42,7 @@ def plotResults(data, sel, gmm, patch=None):
     # add complete data logL to plot
     logL = gmm.logL(data).mean()
     ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
-    
+
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
     ax.set_xticks([])
@@ -82,7 +82,7 @@ if __name__ == '__main__':
     seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pool = Pool(processes=2)
+    pool =  Pool()
     verbose = False
 
     # draw N points from 3-component GMM
@@ -122,18 +122,17 @@ if __name__ == '__main__':
     #ps = patches.PathPatch(path, fc="none", ec='b', ls='dotted')
 
     sel = cb(orig)
-    data = orig[sel]
+    data = iemgmm.createShared(orig[sel])
 
     """
     new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, rng=rng, verbose=False)
     plotResults(orig, sel, new_gmm, patch=ps)
 
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum())#, verbose=True)
-    plotResults(orig, sel, new_gmm, patch=ps)
-    
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=False, rng=rng, pool=pool)
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum()), verbose=False)
     plotResults(orig, sel, new_gmm, patch=ps)
 
+    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=True, rng=rng, pool=pool)
+    plotResults(orig, sel, new_gmm, patch=ps)
     """
     # repeated runs: store results and logL
     imp = iemgmm.GMM(K=K*R, D=D)
@@ -142,7 +141,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, rng=rng, verbose=verbose)
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, rng=rng, verbose=verbose, pool=pool)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -155,7 +154,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, verbose=verbose)
+        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean

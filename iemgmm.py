@@ -1,4 +1,15 @@
 import numpy as np
+import multiprocessing
+import ctypes
+
+# for multiprocessing: use shared arrays to avoid copies for each thread
+# http://stackoverflow.com/questions/5549190/
+def createShared(a, dtype=ctypes.c_double):
+    shared_array_base = multiprocessing.Array(dtype, a.size)
+    shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+    shared_array[:] = a.flatten()
+    shared_array = shared_array.reshape(a.shape)
+    return shared_array
 
 # this is to allow multiprocessing pools to operate on class methods:
 # https://gist.github.com/bnyeggen/1086393
@@ -27,7 +38,7 @@ copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
 
 class GMM(object):
-    def __init__(self, K=1, D=1, rng=None, verbose=False):
+    def __init__(self, K=1, D=1, rng=None, verbose=False, initialize_empty=True):
         if rng is None:
             self.rng = np.random
         else:
@@ -155,23 +166,26 @@ class IEMGMM(GMM):
 
     def __init__(self, data, covar=None, K=1, s=None, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=None, rng=None, pool=None, verbose=False):
         GMM.__init__(self, K=K, D=data.shape[1], rng=rng, verbose=verbose)
-
         self.w = w
+
         if init_callback is not None:
             self.amp, self.mean, self.covar = init_callback(K)
         else:
             self._initializeModel(K, s, data)
+
         self._run_EM(data, covar=covar, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, pool=pool)
 
     # no imputation for now
     def _run_EM(self, data, covar=None, cutoff=None, sel_callback=None, n_missing=None, pool=None, tol=1e-3):
         maxiter = 100
+        if pool is None:
+            pool = multiprocessing.Pool(processes=1)
 
         # sum_k p(x|k) -> S
         # extra precautions for cases when some points are treated as outliers
         # and not considered as belonging to any component
         S = np.zeros(len(data)) # S = sum_k p(x|k)
-        log_S = np.empty(len(data))
+        log_S = createShared(np.empty(len(data)))
         N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
         neighborhood = [None for k in xrange(self.K)]
         log_p = [[] for k in xrange(self.K)]
@@ -197,10 +211,12 @@ class IEMGMM(GMM):
         n_guess = None
         while it < maxiter: # limit loop in case of no convergence
 
-            # compute p(i | k) for each k independently
+            # compute p(i | k) for each k independently in the pool
             # need S = sum_k p(i | k) for further calculation
-            for k in xrange(self.K):
-                log_p[k], neighborhood[k], T_inv[k] = self._E(k, data, covar=covar, neighborhood_k=neighborhood[k], cutoff=cutoff)
+            # also N = {i | i in neighborhood[k]} for any k
+            results = [pool.apply_async(self._E, (k, data, covar, neighborhood[k], cutoff)) for k in xrange(self.K)]
+            for r in results:
+                k, log_p[k], neighborhood[k], T_inv[k] = r.get()
                 S[neighborhood[k]] += np.exp(log_p[k])
                 N[neighborhood[k]] = 1
                 if self.verbose:
@@ -210,11 +226,13 @@ class IEMGMM(GMM):
             log_S[N] = np.log(S[N])
             logL_ = logL_obs_ = self._logsum(log_S[N])
 
-            for k in xrange(self.K):
-                A[k], M[k], C[k], P[k] = self._computeMSums(k, data, log_p[k], log_S, neighborhood[k], T_inv_k=T_inv[k])
-
             if self.verbose:
                 print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
+
+            # perform sums for M step in the pool
+            results = [pool.apply_async(self._computeMSums, (k, data, log_p[k], log_S, neighborhood[k], T_inv[k])) for k in xrange(self.K)]
+            for r in results:
+                k, A[k], M[k], C[k], P[k] = r.get()
 
             # need to do MC integral of p(missing | k):
             # get missing data by imputation from the current model
@@ -229,25 +247,15 @@ class IEMGMM(GMM):
                 P2 = np.zeros(self.K)
                 n_impute = 0
 
-                if pool is None:
-                    for rd in xrange(RDs):
-                        A2_, M2_, C2_, P2_, logL2_, n_impute_ = self._computeIMSums(sel_callback, len(data), n_missing, n_guess, cutoff, seed=it*rd)
-                        A2 += A2_
-                        M2 += M2_
-                        C2 += C2_
-                        P2 += P2_
-                        logL2 += logL2_
-                        n_impute += n_impute_
-                else:
-                    results = [pool.apply_async(self._computeIMSums, (sel_callback, len(data), n_missing, n_guess, cutoff, it*rd)) for rd in xrange(RDs)]
-                    for r in results:
-                        A2_, M2_, C2_, P2_, logL2_, n_impute_ = r.get()
-                        A2 += A2_
-                        M2 += M2_
-                        C2 += C2_
-                        P2 += P2_
-                        logL2 += logL2_
-                        n_impute += n_impute_
+                results = [pool.apply_async(self._computeIMSums, (sel_callback, len(data), n_missing, n_guess, cutoff, it*rd)) for rd in xrange(RDs)]
+                for r in results:
+                    A2_, M2_, C2_, P2_, logL2_, n_impute_ = r.get()
+                    A2 += A2_
+                    M2 += M2_
+                    C2 += C2_
+                    P2 += P2_
+                    logL2 += logL2_
+                    n_impute += n_impute_
 
                 if soften > 0 and RDs > 0:
                     A2 *= soften / RDs
@@ -267,7 +275,7 @@ class IEMGMM(GMM):
                 print  ""
 
             # convergence test:
-            if it > 5 and logL_ - logL < tol and logL_obs_ < logL_obs:
+            if it > 5 and logL_ - logL < tol and logL_obs_ <= logL_obs:
                 break
             else:
                 logL = logL_
@@ -296,7 +304,7 @@ class IEMGMM(GMM):
         for k in xrange(self.K):
             # to minimize the components with tiny p(x|k) in sum:
             # only use those within cutoff
-            log_p_k, neighborhood_k, _ = self._E(k, data, covar=covar, cutoff=cutoff)
+            k, log_p_k, neighborhood_k, T_inv_k = self._E(k, data, covar=covar, cutoff=cutoff)
             S[neighborhood_k] += np.exp(log_p_k)
         return np.log(S)
 
@@ -333,7 +341,7 @@ class IEMGMM(GMM):
         (sign, logdet) = np.linalg.slogdet(self.covar[k])
 
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
-        return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
+        return k, np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
 
 
     def _M(self, A, M, C, P, n_points, A2=None, M2=None, C2=None, P2=None, n_points2=None):
@@ -418,7 +426,7 @@ class IEMGMM(GMM):
             # run E now on data2
             # then combine respective sums in M step
             for k in xrange(self.K):
-                log_p2[k], neighborhood2[k], _ = self._E(k, data2, cutoff=cutoff)
+                k, log_p2[k], neighborhood2[k], _ = self._E(k, data2, cutoff=cutoff)
                 S2[neighborhood2[k]] += np.exp(log_p2[k])
 
             log_S2 = np.log(S2)
@@ -427,7 +435,7 @@ class IEMGMM(GMM):
             for k in xrange(self.K):
                 # with small imputation sets: neighborhood2[k] might be empty
                 if neighborhood2[k] is None or neighborhood2[k].size:
-                    A2[k], M2[k], C2[k], P2[k] = self._computeMSums(k, data2, log_p2[k], log_S2, neighborhood2[k])
+                    k, A2[k], M2[k], C2[k], P2[k] = self._computeMSums(k, data2, log_p2[k], log_S2, neighborhood2[k])
         return A2, M2, C2, P2, logL2, n_impute
 
 
@@ -470,7 +478,7 @@ class IEMGMM(GMM):
             b_k -= self.mean[k]
             B_k = self.covar[k] - np.einsum('ij,...jk,...kl', self.covar[k], T_inv_k, self.covar[k])
             C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
-        return A_k, M_k, C_k, P_k
+        return k, A_k, M_k, C_k, P_k
 
 
     def _logsum(self, l):
