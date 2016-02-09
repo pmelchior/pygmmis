@@ -241,11 +241,9 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
         results = [pool.apply_async(_E, (gmm, k, data, covar, neighborhood[k], cutoff)) for k in xrange(gmm.K)]
         for r in results:
             k, log_p[k], neighborhood[k], T_inv[k] = r.get()
-        # for k in xrange(gmm.K):
-        #     k, log_p[k], neighborhood[k], T_inv[k] = _E(gmm, k, data, covar, neighborhood[k], cutoff)
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
-            if gmm.verbose:
+            if gmm.verbose >= 2:
                 print "  k=%d: amp=%.3f pos=(%.1f, %.1f) s=%.2f |I| = %d <S> = %.3f" % (k, gmm.amp[k], gmm.mean[k][0], gmm.mean[k][1], np.linalg.det(gmm.covar[k])**(0.5/gmm.D), log_p[k].size, np.log(S[neighborhood[k]]).mean())
 
         # since log(0) isn't a good idea, need to restrict to N
@@ -259,8 +257,6 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
         results = [pool.apply_async(_computeMSums, (gmm, k, data, log_p[k], log_S, neighborhood[k], T_inv[k])) for k in xrange(gmm.K)]
         for r in results:
             k, A[k], M[k], C[k], P[k] = r.get()
-        # for k in xrange(gmm.K):
-        #     k, A[k], M[k], C[k], P[k] = _computeMSums(gmm, k, data, log_p[k], log_S, neighborhood[k], T_inv[k])
 
         # need to do MC integral of p(missing | k):
         # get missing data by imputation from the current model
