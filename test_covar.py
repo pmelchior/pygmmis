@@ -126,7 +126,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -152,7 +152,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -165,7 +165,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean

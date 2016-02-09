@@ -129,13 +129,13 @@ if __name__ == '__main__':
     init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
 
     """
-    new_gmm = iemgmm.fit(data, K=K, cutoff=10, w=0.1, init_callback=init_cb, pool=pool, verbose=True)
+    new_gmm = iemgmm.fit(data, K=K, cutoff=10, w=0.1, init_callback=init_cb, verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
 
-    new_gmm = iemgmm.fit(data, K=K, cutoff=10, w=0.1, init_callback=init_cb, sel_callback=cb, n_missing=(sel==False).sum(), pool=pool, verbose=True)
+    new_gmm = iemgmm.fit(data, K=K, cutoff=10, w=0.1, init_callback=init_cb, sel_callback=cb, n_missing=(sel==False).sum(), verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
 
-    new_gmm = iemgmm.fit(data, K=K, cutoff=5, w=0.1, init_callback=init_cb, sel_callback=cb, n_missing=None, pool=pool, verbose=True)
+    new_gmm = iemgmm.fit(data, K=K, cutoff=5, w=0.1, init_callback=init_cb, sel_callback=cb, n_missing=None, verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
     """
 
@@ -146,7 +146,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, cutoff=5, verbose=verbose, pool=pool, init_callback=init_cb)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, cutoff=5, verbose=verbose, init_callback=init_cb)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -159,7 +159,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, cutoff=5, init_callback=init_cb, sel_callback=cb, n_missing=None, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, cutoff=5, init_callback=init_cb, sel_callback=cb, n_missing=None, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
