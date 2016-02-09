@@ -201,7 +201,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=N
     return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, tol=tol)
 
 def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
-    maxiter = 100
+    maxiter = max(100, gmm.K)
 
     pool = multiprocessing.Pool()
 
