@@ -88,7 +88,7 @@ if __name__ == '__main__':
     # draw N points from 3-component GMM
     N = 400
     D = 2
-    gmm = iemgmm.GMM(K=3, D=2, rng=rng)
+    gmm = iemgmm.GMM(K=3, D=2)
     gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
     gmm.amp /= gmm.amp.sum()
     gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -101,7 +101,7 @@ if __name__ == '__main__':
                                  [[ 0.00258605,  0.00409287],
                                  [ 0.00409287,  0.01065186]]])*100
 
-    orig = gmm.draw(N)
+    orig = gmm.draw(N, rng=rng)
 
     K = 3
     R = 10
@@ -124,16 +124,21 @@ if __name__ == '__main__':
     sel = cb(orig)
     data = iemgmm.createShared(orig[sel])
 
+    # make sure that the initial placement of the components
+    # uses the same RNG for comparison
+    init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
+
     """
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, rng=rng, verbose=False)
+    new_gmm = iemgmm.fit(data, K=K, cutoff=10, w=0.1, init_callback=init_cb, pool=pool, verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
 
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=10, w=0.1, sel_callback=cb, n_missing=(sel==False).sum()), verbose=False)
+    new_gmm = iemgmm.fit(data, K=K, cutoff=10, w=0.1, init_callback=init_cb, sel_callback=cb, n_missing=(sel==False).sum(), pool=pool, verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
 
-    new_gmm = iemgmm.IEMGMM(data, K=K, cutoff=5, w=0.1, sel_callback=cb, n_missing=None, verbose=True, rng=rng, pool=pool)
+    new_gmm = iemgmm.fit(data, K=K, cutoff=5, w=0.1, init_callback=init_cb, sel_callback=cb, n_missing=None, pool=pool, verbose=True)
     plotResults(orig, sel, new_gmm, patch=ps)
     """
+
     # repeated runs: store results and logL
     imp = iemgmm.GMM(K=K*R, D=D)
 
@@ -141,7 +146,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, rng=rng, verbose=verbose, pool=pool)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, cutoff=5, verbose=verbose, pool=pool, init_callback=init_cb)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -154,20 +159,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=verbose)
-        ll = imp_.logL(data).mean()
-        imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
-        imp.mean[r*K:(r+1)*K,:] = imp_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
-    imp.amp /= imp.amp.sum()
-    print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, sel, imp, patch=ps)
-
-    # 3) same with worker pool
-    start = datetime.datetime.now()
-    rng = RandomState(seed)
-    for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, n_missing=None, rng=rng, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, cutoff=5, init_callback=init_cb, sel_callback=cb, n_missing=None, pool=pool, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
