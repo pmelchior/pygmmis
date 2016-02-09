@@ -192,8 +192,8 @@ def initalizeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.rand
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (K,1,1))
 
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=initializeFromDataMinMax, verbose=False):
-    gmm = GMM(K=K, D=data.shape[1], tol=1e-3, verbose=verbose)
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False):
+    gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     # init function as generic call
     init_callback(gmm, K, data, covar)
