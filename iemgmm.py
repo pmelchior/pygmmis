@@ -193,12 +193,12 @@ def initalizeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.rand
 
 
 def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=initializeFromDataMinMax, verbose=False):
-    gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
+    gmm = GMM(K=K, D=data.shape[1], tol=1e-3, verbose=verbose)
 
     # init function as generic call
     init_callback(gmm, K, data, covar)
 
-    return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing)
+    return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, tol=tol)
 
 def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
     maxiter = 100
