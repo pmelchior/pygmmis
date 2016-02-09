@@ -184,7 +184,7 @@ def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.rando
             print "initializing spheres with s=%.2f" % s
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
-def initalizeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.random):
+def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.random):
     gmm.amp[:] = np.ones(K)/K
     # initialize components around data points with uncertainty s
     refs = np.random.randint(0, len(coords), size=K)
