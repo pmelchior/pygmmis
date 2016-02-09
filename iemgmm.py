@@ -187,9 +187,9 @@ def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.rando
 def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.random):
     gmm.amp[:] = np.ones(K)/K
     # initialize components around data points with uncertainty s
-    refs = np.random.randint(0, len(coords), size=K)
-    gmm.mean[:,:] = coords[refs] + np.random.normal(0, s, size=(K,3))
-    gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (K,1,1))
+    refs = np.random.randint(0, len(data), size=K)
+    gmm.mean[:,:] = coords[refs] + np.random.normal(0, s, size=(gmm.K,3))
+    gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
 
 def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False):
