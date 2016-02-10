@@ -209,7 +209,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
     # extra precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
     S = np.zeros(len(data)) # S = sum_k p(x|k)
-    log_S = createShared(np.empty(len(data)))
+    log_S = np.empty(len(data))
     N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
     neighborhood = [None for k in xrange(gmm.K)]
     log_p = [[] for k in xrange(gmm.K)]
@@ -300,11 +300,14 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
             print  ""
 
         # convergence test:
-        if it > 5 and logL_ - logL < tol and logL_obs_ <= logL_obs:
-            break
-        else:
-            logL = logL_
-            logL_obs = logL_obs_
+        if it > 5 and logL_ - logL < tol:
+            if sel_callback is None:
+                break
+            elif logL_obs_ < logL_obs:
+                break
+
+        logL = logL_
+        logL_obs = logL_obs_
 
         # perform M step with M-sums of data and imputations runs
         _M(gmm, A, M, C, P, N.sum(), w, A2, M2, C2, P2, n_impute)
@@ -318,7 +321,6 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
             V[c] = V_[c]
             if gmm.verbose:
                 print " resetting neighborhood[%d] due to volume change" % c
-
         S[:] = 0
         N[:] = 0
         it += 1
