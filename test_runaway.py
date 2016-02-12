@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import datetime
 from functools import partial
-from multiprocessing import Pool
-
 
 def plotResults(orig, data, gmm, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -157,21 +155,18 @@ def getCut(coords):
     return (coords[:,0] < 5)
 
 
-
 if __name__ == '__main__':
 
-
-    # set up RNG and worker pool
+    # set up RNG
     seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pool = Pool(processes=2)
     verbose = True
 
     # draw N points from 3-component GMM
     N = 400
     D = 2
-    gmm = iemgmm.GMM(K=3, D=2, rng=rng)
+    gmm = iemgmm.GMM(K=3, D=2)
     gmm.amp[:] = np.array([ 0.42561594,  0.33032903,  0.24405504])
     gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
                               [ 0.70306351,  0.6709532 ],
@@ -183,7 +178,7 @@ if __name__ == '__main__':
                                  [[ 0.00258605,  0.00409287],
                                  [ 0.00409287,  0.01065186]]])*100
 
-    orig = gmm.draw(N)
+    orig = gmm.draw(N, rng=rng)
 
     K = 3
 
@@ -198,12 +193,15 @@ if __name__ == '__main__':
     data = noisy[sel]
     covar = np.tile(disp**2 * np.eye(D), (len(data), 1, 1))
 
+    # make sure that the initial placement of the components
+    # uses the same RNG for comparison
+    init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
 
     # IEMGMM with imputation, incorporating errors
     logfile = "logfile.txt"
     start = datetime.datetime.now()
     rng = RandomState()
-    imp = iemgmm.IEMGMM(data, covar=covar, K=K, s=None, w=0.1, cutoff=10, sel_callback=cb, rng=rng, pool=pool, logfile=None, verbose=verbose)
+    imp = iemgmm.fit(data, covar=covar, K=K, w=0.1, cutoff=10, sel_callback=cb, init_callback=init_cb, logfile=logfile, verbose=verbose)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
     plotTraces(logfile)

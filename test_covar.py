@@ -42,7 +42,7 @@ def plotResults(orig, data, gmm, patch=None):
     # add complete data logL to plot
     logL = gmm.logL(orig).mean()
     ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
-    
+
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
     ax.set_xticks([])
@@ -74,21 +74,19 @@ def getTaperedDensity(coords, rng=np.random):
 def getCut(coords):
     return (coords[:,0] < 5)
 
-
-
 if __name__ == '__main__':
 
     # set up RNG and worker pool
     seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pool = Pool(processes=2)
+    pool = Pool()
     verbose = False
 
     # draw N points from 3-component GMM
     N = 400
     D = 2
-    gmm = iemgmm.GMM(K=3, D=2, rng=rng)
+    gmm = iemgmm.GMM(K=3, D=2)
     gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
     gmm.amp /= gmm.amp.sum()
     gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -101,7 +99,7 @@ if __name__ == '__main__':
                                  [[ 0.00258605,  0.00409287],
                                  [ 0.00409287,  0.01065186]]])*100
 
-    orig = gmm.draw(N)
+    orig = gmm.draw(N, rng=rng)
 
     K = 3
     R = 10
@@ -114,9 +112,13 @@ if __name__ == '__main__':
     disp = 0.5
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     sel = cb(noisy)
-    data = noisy[sel]
-    covar = np.tile(disp**2 * np.eye(D), (len(data), 1, 1))
-    
+    data = iemgmm.createShared(noisy[sel])
+    covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
+
+    # make sure that the initial placement of the components
+    # uses the same RNG for comparison
+    init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
+
     # repeated runs: store results and logL
     imp = iemgmm.GMM(K=K*R, D=D)
 
@@ -124,7 +126,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, rng=rng, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -137,7 +139,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, covar=covar, K=K, w=0.1, cutoff=5, rng=rng, verbose=verbose)
+        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -150,7 +152,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, K=K, w=0.1, cutoff=5, sel_callback=cb, rng=rng, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -158,12 +160,12 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
-    
+
     # 4) IEMGMM with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.IEMGMM(data, covar=covar, K=K, w=0.1, cutoff=5, sel_callback=cb, rng=rng, pool=pool, verbose=verbose)
+        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
         ll = imp_.logL(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp * np.exp(ll)
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
