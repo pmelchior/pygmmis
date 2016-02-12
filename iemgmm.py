@@ -203,7 +203,9 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=N
 def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missing=None, tol=1e-3):
     maxiter = max(100, gmm.K)
 
-    pool = multiprocessing.Pool()
+    # limit the pool to 8 workers: parallel implementation
+    # not efficient beyond that due to work load for main thread
+    pool = multiprocessing.Pool(processes=min(8, multiprocessing.cpu_count()))
 
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
