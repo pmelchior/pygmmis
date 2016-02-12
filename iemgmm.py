@@ -172,7 +172,7 @@ def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.rando
     # volumne spanned by data
     min_pos = data.min(axis=0)
     max_pos = data.max(axis=0)
-    gmm.mean[:,:] = min_pos + (max_pos-min_pos)*np.random.rand(gmm.K, gmm.D)
+    gmm.mean[:,:] = min_pos + (max_pos-min_pos)*rng.rand(gmm.K, gmm.D)
     # if s is not set: use volume filling argument:
     # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
     # should completely fill the volume spanned by data.
@@ -187,8 +187,8 @@ def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.rando
 def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.random):
     gmm.amp[:] = np.ones(K)/K
     # initialize components around data points with uncertainty s
-    refs = np.random.randint(0, len(data), size=K)
-    gmm.mean[:,:] = data[refs] + np.random.normal(0, s, size=(gmm.K,3))
+    refs = rng.randint(0, len(data), size=K)
+    gmm.mean[:,:] = data[refs] + rng.normal(0, s, size=(gmm.K,3))
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
 
@@ -203,7 +203,9 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=N
 def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missing=None, tol=1e-3, logfile=None):
     maxiter = max(100, gmm.K)
 
-    pool = multiprocessing.Pool()
+    # limit the pool to 8 workers: parallel implementation
+    # not efficient beyond that due to work load for main thread
+    pool = multiprocessing.Pool(processes=min(8, multiprocessing.cpu_count()))
 
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
