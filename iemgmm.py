@@ -38,10 +38,6 @@ copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
 class GMM(object):
     def __init__(self, K=1, D=1, verbose=False):
-        # if rng is None:
-        #     self.rng = np.random
-        # else:
-        #     self.rng = rng
         self.verbose = verbose
 
         self.amp = np.zeros((K))
@@ -253,7 +249,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
 
         # since log(0) isn't a good idea, need to restrict to N
         log_S[N] = np.log(S[N])
-        logL_ = logL_obs_ = _logsum(log_S[N])
+        logL_ = logL_obs_ = log_S[N].sum()
 
         if gmm.verbose:
             print ("%d\t%d\t%.4f" % (it, N.sum(), logL_)),
@@ -267,9 +263,10 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
         # get missing data by imputation from the current model
         if sel_callback is not None:
             RD = 200
-            soften = 1 - np.exp(-it*0.1)
+            soften =  1./(1+np.exp(-(it-25.)/5))
             RDs = int(RD*soften)
             logL2 = 0
+            log_S2_mean = 0
             A2 = np.zeros(gmm.K)
             M2 = np.zeros((gmm.K, gmm.D))
             C2 = np.zeros((gmm.K, gmm.D, gmm.D))
@@ -278,12 +275,13 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
 
             results = [pool.apply_async(_computeIMSums, (gmm, sel_callback, len(data), n_missing, n_guess, cutoff, it*rd)) for rd in xrange(RDs)]
             for r in results:
-                A2_, M2_, C2_, P2_, logL2_, n_impute_ = r.get()
+                A2_, M2_, C2_, P2_, logL2_, log_S2_mean_, n_impute_ = r.get()
                 A2 += A2_
                 M2 += M2_
                 C2 += C2_
                 P2 += P2_
                 logL2 += logL2_
+                log_S2_mean += log_S2_mean_
                 n_impute += n_impute_
 
             if soften > 0 and RDs > 0:
@@ -291,15 +289,17 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
                 M2 *= soften / RDs
                 C2 *= soften / RDs
                 P2 *= soften / RDs
+                log_S2_mean /= RDs
                 logL2 /= RDs
-                logL_ += logL2 + np.log(soften)
+                logL2 += np.log(soften)
+                logL_ += logL2
                 n_impute = n_impute * soften / RDs
 
                 # update n_guess with <n_impute>
                 n_guess = n_impute / soften
 
                 if gmm.verbose:
-                    print "\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)
+                    print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, logL2, logL_)),
 
         if gmm.verbose:
             print  ""
@@ -319,9 +319,9 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
             if sel_callback is None:
                 logL2 = soften = n_impute = -1
                 P2 = np.ones_like(P)
-            logfile.write("%d\t%.3f\t%.3f\t%.3f\t%.3f\t%.6f\t" % (it, logL_obs_, logL2, logL_, soften, n_impute))
+            logfile.write("%d\t%.3f\t%.4f\t%.4f\t%.4f\t%.1f\t%.6f\t%.4f\t%.4f" % (it, soften, logL_, logL_obs_, logL2, N.sum(), n_impute,  log_S[N].mean(), log_S2_mean))
             for k in xrange(gmm.K):
-                logfile.write("%.3f\t%.2f\t%.3f\t%.3f\t%.3f\t" % (gmm.amp[k], np.linalg.det(gmm.covar[k])**(0.5/gmm.D), np.log(P[k]) - np.log(gmm.amp[k]), np.log(P2[k]) - np.log(gmm.amp[k]), np.log(P[k]) + np.log(P2[k])))
+                logfile.write("\t%.3f\t%.4f\t%.4f" % (gmm.amp[k], np.log(P[k]), np.log(P2[k])))
             logfile.write("\n")
 
         # perform M step with M-sums of data and imputations runs
@@ -484,6 +484,7 @@ def _computeIMSums(gmm, sel_callback, len_data, n_missing, n_guess, cutoff, seed
     C2 = np.zeros((gmm.K, gmm.D, gmm.D))
     P2 = np.zeros(gmm.K)
     logL2 = 0
+    log_S2_mean = 0
     n_impute = len(data2)
 
     if len(data2):
@@ -501,13 +502,14 @@ def _computeIMSums(gmm, sel_callback, len_data, n_missing, n_guess, cutoff, seed
             S2[neighborhood2[k]] += np.exp(log_p2[k])
 
         log_S2 = np.log(S2)
-        logL2 = _logsum(log_S2)
+        log_S2_mean = log_S2.mean()
+        logL2 = log_S2.sum()
 
         for k in xrange(gmm.K):
             # with small imputation sets: neighborhood2[k] might be empty
             if neighborhood2[k] is None or neighborhood2[k].size:
                 k, A2[k], M2[k], C2[k], P2[k] = _computeMSums(gmm, k, data2, log_p2[k], log_S2, neighborhood2[k])
-    return A2, M2, C2, P2, logL2, n_impute
+    return A2, M2, C2, P2, logL2, log_S2_mean, n_impute
 
 def _I(gmm, sel_callback, len_data=None, n_missing=None, n_guess=None, alpha=0.05):
     # create imputation sample from the current model

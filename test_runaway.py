@@ -65,65 +65,47 @@ def plotTraces(filename='logfile.txt'):
 
     fig = plt.figure(figsize=(6,15))
     ax = fig.add_subplot(511)
-    """ax.plot(rw[:,0], rw[:,1], label='logL_obs')
-    ax.plot(rw[:,0], rw[:,2], label='logL2')
-    ax.plot(rw[:,0], rw[:,3], 'k-', label='logL')
-    ax.legend(frameon=False)
-    ax.set_ylabel('$\log\mathcal{L}$')"""
-
-    #ax = fig.add_subplot(512)
-    ax.plot(rw[:,0], rw[:,6], label='0')
-    ax.plot(rw[:,0], rw[:,11], label='1')
-    ax.plot(rw[:,0], rw[:,16], label='2')
+    ax.plot(rw[:,0], rw[:,9], label='0')
+    ax.plot(rw[:,0], rw[:,12], label='1')
+    ax.plot(rw[:,0], rw[:,15], label='2')
     ax.plot(rw[:,0], gmm.amp[0]*np.ones(len(rw)), 'k:')
     ax.plot(rw[:,0], gmm.amp[1]*np.ones(len(rw)), 'k:')
     ax.plot(rw[:,0], gmm.amp[2]*np.ones(len(rw)), 'k:')
-    ax.plot(rw[:,0], rw[:,5]/len(data), 'k-', label='N')
+    ax.plot(rw[:,0], rw[:,6]/rw[:,5], 'k-', label='N_m/N_o')
     ax.set_ylabel(r'$\alpha_k$')
     ax.legend(frameon=False)
 
-    """
-    ax = fig.add_subplot(513)
-    ax.plot(rw[:,0], rw[:,10], label='0')
-    ax.plot(rw[:,0], rw[:,15], label='1')
-    ax.plot(rw[:,0], rw[:,20], label='2')
-    ax.plot(rw[:,0], rw[:,9], 'b--')
-    ax.plot(rw[:,0], rw[:,14], 'g--')
-    ax.plot(rw[:,0], rw[:,19], 'r--')
-    #ax.set_ylim(bottom=-10)
-    ax.set_ylabel('$\log\mathcal{L}_k$')
-    ax.legend(frameon=False)
-
-    ax.plot(rw[:,0], rw[:,10] - np.log(np.exp(rw[:,15]) + np.exp(rw[:,20])), label='0')
-    ax.plot(rw[:,0], rw[:,15] - np.log(np.exp(rw[:,10]) + np.exp(rw[:,20])), label='1')
-    ax.plot(rw[:,0], rw[:,20] - np.log(np.exp(rw[:,15]) + np.exp(rw[:,10])), label='2')
-
-    ax.plot(rw[:,0], gradf(np.exp(rw[:,10]))/(np.exp(rw[:,15]) + np.exp(rw[:,20])), label='0')
-    ax.plot(rw[:,0], gradf(np.exp(rw[:,15]))/(np.exp(rw[:,10]) + np.exp(rw[:,20])), label='1')
-    ax.plot(rw[:,0], gradf(np.exp(rw[:,20]))/(np.exp(rw[:,15]) + np.exp(rw[:,10])), label='2')
-    """
-
     ax = fig.add_subplot(512)
-    ax.plot(rw[:,0], gradf_n(rw[:,10]), label='0')
-    ax.plot(rw[:,0], gradf_n(rw[:,15]), label='1')
-    ax.plot(rw[:,0], gradf_n(rw[:,20]), label='2')
+    ax.plot(rw[:,0], rw[:,2], 'k-', label='lnL')
+    ax.plot(rw[:,0], rw[:,3], 'b-', label='ln_o')
+    ax.plot(rw[:,0], rw[:,4], 'r-', label='lnL_m')
     ax.legend(frameon=False)
 
     ax = fig.add_subplot(513)
-    ax.plot(rw[:,0], gradf_n(np.exp(rw[:,10])) -  (gradf_n(np.exp(rw[:,15])) + gradf_n(np.exp(rw[:,20]))), label='0')
-    ax.plot(rw[:,0], gradf_n(np.exp(rw[:,15])) -  (gradf_n(np.exp(rw[:,10])) + gradf_n(np.exp(rw[:,20]))), label='1')
-    ax.plot(rw[:,0], gradf_n(np.exp(rw[:,20])) -  (gradf_n(np.exp(rw[:,15])) + gradf_n(np.exp(rw[:,10]))), label='2')
+    ax.plot(rw[:,0], rw[:,5] * gradf(rw[:,7]), label='N*d<lnL_o>/dt')
+    ax.plot(rw[:,0], rw[:,6] * gradf(rw[:,8]), label='N_m*d<lnL_m>/dt')
+    ax.plot(rw[:,0], gradf(rw[:,6]) * rw[:,8], label='<lnL_m>dN_m/dt')
+    ax.plot(rw[:,0], rw[:,5] * gradf(rw[:,7]) + rw[:,6] * gradf(rw[:,8]) + gradf(rw[:,6]) * rw[:,8], 'k--', label='cont')
+    ax.plot(rw[:,0], gradf(rw[:,2]), 'k-', label='dlnL/dt')
     ax.legend(frameon=False)
+
+    limit = -1. / rw[:,8] * (rw[:,5] * gradf(rw[:,7]) + rw[:,6] * gradf(rw[:,8]))
+
 
     ax = fig.add_subplot(514)
-    ax.plot(rw[:,0], rw[:,3]*gradn_f(rw[:,10]), label='0')
-    ax.plot(rw[:,0], rw[:,3]*gradn_f(rw[:,15]), label='1')
-    ax.plot(rw[:,0], rw[:,3]*gradn_f(rw[:,20]), label='2')
-    ax.plot(rw[:,0], rw[:,5], 'k-', label='N_imp')
+    P_o = np.exp(rw[:,10]) + np.exp(rw[:,13]) + np.exp(rw[:,16])
+    P_m = np.exp(rw[:,11]) + np.exp(rw[:,14]) + np.exp(rw[:,17])
+    N = len(data)*1.
+    ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,11])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,10])), label='0')
+    ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,14])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,13])), label='1')
+    ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,17])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,16])), label='2')
+    ax.plot(rw[:,0], limit*np.ones_like(rw[:,0]), 'k:')
+    ax.plot(rw[:,0], gradf(rw[:,6]), 'k-', label='1+2+3')
+    ax.set_ylabel(r'$dN_{o,k}/dt$')
     ax.legend(frameon=False)
 
     ax = fig.add_subplot(515)
-    ax.plot(rw[:,0], rw[:,4], 'k-', label='soften')
+    ax.plot(rw[:,0], rw[:,1], 'k-', label='soften')
     ax.set_ylabel('soften')
     ax.set_xlabel('iteration')
     plt.subplots_adjust(hspace=0.02, bottom=0.06, right=0.95,  top=0.99)
@@ -158,7 +140,7 @@ def getCut(coords):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = 42
+    seed = None
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = True
@@ -201,7 +183,7 @@ if __name__ == '__main__':
     logfile = "logfile.txt"
     start = datetime.datetime.now()
     rng = RandomState()
-    imp = iemgmm.fit(data, covar=covar, K=K, w=0.1, cutoff=10, sel_callback=cb, init_callback=init_cb, logfile=logfile, verbose=verbose)
+    imp = iemgmm.fit(data, covar=covar, K=K, w=0.1, cutoff=10, sel_callback=cb, init_callback=init_cb, logfile=logfile, verbose=verbose, n_missing=None)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
     plotTraces(logfile)
