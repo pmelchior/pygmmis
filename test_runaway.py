@@ -140,7 +140,7 @@ def getCut(coords):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = None
+    seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = True
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
 
     # add isotropic errors on data
-    disp = 0.2
+    disp = 0.5
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     sel = cb(noisy)
     data = noisy[sel]
