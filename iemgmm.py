@@ -221,11 +221,11 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
     M_ = np.empty((gmm.K, gmm.D))
     C_ = np.empty((gmm.K, gmm.D, gmm.D))
     P_ = np.empty(gmm.K)
-    P = np.empty(gmm.K)
+    A = np.empty(gmm.K)
 
     # "global" imputation variables
     log_S2_mean = N_imp = N_guess = limiter = None
-    P2 = np.empty(gmm.K)
+    A2 = np.empty(gmm.K)
 
     if logfile is not None:
         logfile = open(logfile, 'w')
@@ -312,17 +312,16 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                 limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
                 # if above limit: determine which component(s) drive it
                 if d_N_imp > limit:
-                    P_o_ = P_.sum()
-                    P_m_ = P2_.sum()
-                    d_P_o = P_ - P
-                    d_P_m = P2_ - P2
-                    d_N_m = N_ / P_o_ * d_P_m - N_* P_m_ / P_o_**2 * d_P_o
-                    # d_N_imp = sum_k d_N_m
-                    limiter = limit / d_N_imp / (1-d_N_m)
+                    A_o_ = A_.sum()
+                    A_m_ = A2_.sum()
+                    d_A_o = A_ - A
+                    d_A_m = A2_ - A2
+                    d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
+                    limiter = limit / d_N_m
                     # cast into useable limits
                     limiter[limiter <= 0] = 1
                     limiter =  np.minimum(1, np.maximum(0, limiter))
-
+                    
         if gmm.verbose:
             print  ""
 
@@ -340,8 +339,8 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         # update all important _ quantities for convergence test
         log_L = log_L_
         log_L_obs = log_L_obs_
-        P[:] = P_[:]
-        P2[:] = P2_[:]
+        A[:] = A_[:]
+        A2[:] = A2_[:]
         log_S_mean = log_S_mean_
         log_S2_mean = log_S2_mean_
         N_imp = N_imp_
@@ -353,7 +352,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                 P2 = np.ones_like(P)
             logfile.write("%d\t%.3f\t%.4f\t%.4f\t%.4f\t%.1f\t%.6f\t%.4f\t%.4f" % (it, soften, log_L_, log_L_obs_, log_L2_, N_, N_imp,  log_S_mean, log_S2_mean))
             for k in xrange(gmm.K):
-                logfile.write("\t%.3f\t%.4f\t%.4f" % (gmm.amp[k], np.log(P[k]), np.log(P2[k])))
+                logfile.write("\t%.3f\t%.4f\t%.4f" % (gmm.amp[k], np.log(A_[k]), np.log(A2_[k])))
             logfile.write("\n")
 
         # perform M step with M-sums of data and imputations runs

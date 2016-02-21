@@ -93,14 +93,14 @@ def plotTraces(filename='logfile.txt'):
 
 
     ax = fig.add_subplot(514)
-    P_o = np.exp(rw[:,10]) + np.exp(rw[:,13]) + np.exp(rw[:,16])
-    P_m = np.exp(rw[:,11]) + np.exp(rw[:,14]) + np.exp(rw[:,17])
-    N = len(data)*1.
-    ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,11])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,10])), label='0')
-    ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,14])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,13])), label='1')
-    ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,17])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,16])), label='2')
+    A_o = np.exp(rw[:,10]) + np.exp(rw[:,13]) + np.exp(rw[:,16])
+    A_m = np.exp(rw[:,11]) + np.exp(rw[:,14]) + np.exp(rw[:,17])
+    N = rw[:,5]
+    ax.plot(rw[:,0], N/A_o * gradf(np.exp(rw[:,11])) - N*A_m / A_o**2 * gradf(np.exp(rw[:,10])), label='0')
+    ax.plot(rw[:,0], N/A_o * gradf(np.exp(rw[:,14])) - N*A_m / A_o**2 * gradf(np.exp(rw[:,13])), label='1')
+    ax.plot(rw[:,0], N/A_o * gradf(np.exp(rw[:,17])) - N*A_m / A_o**2 * gradf(np.exp(rw[:,16])), label='2')
     ax.plot(rw[:,0], limit*np.ones_like(rw[:,0]), 'k:')
-    ax.plot(rw[:,0], gradf(rw[:,6]), 'k-', label='1+2+3')
+    ax.plot(rw[:,0], gradf(rw[:,6]), 'k-', label='dN_imp/dt')
     ax.set_ylabel(r'$dN_{m,k}/dt$')
     ax.legend(frameon=False)
 
@@ -148,7 +148,7 @@ def getCut(coords):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = None
+    seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = True
