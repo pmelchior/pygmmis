@@ -107,6 +107,14 @@ def plotTraces(filename='logfile.txt'):
     ax = fig.add_subplot(515)
     ax.plot(rw[:,0], rw[:,1], 'k-', label='soften')
     ax.set_ylabel('soften')
+
+    #ax.plot(rw[:,0], limit / 3 / (N/P_o * gradf(np.exp(rw[:,11])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,10]))), label='0')
+    #ax.plot(rw[:,0], limit / 3 / (N/P_o * gradf(np.exp(rw[:,14])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,13]))), label='1')
+    #ax.plot(rw[:,0], limit / 3 / (N/P_o * gradf(np.exp(rw[:,17])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,16]))), label='2')
+    #ax.plot(rw[:,0], np.minimum(1, limit / gradf(rw[:,6])), 'k-')
+    #ax.set_ylabel('dampening')
+
+
     ax.set_xlabel('iteration')
     plt.subplots_adjust(hspace=0.02, bottom=0.06, right=0.95,  top=0.99)
     plt.show()
@@ -140,7 +148,7 @@ def getCut(coords):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = 42
+    seed = None
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = True
@@ -169,7 +177,7 @@ if __name__ == '__main__':
     ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
 
     # add isotropic errors on data
-    disp = 0.5
+    disp = 0.8
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     sel = cb(noisy)
     data = noisy[sel]
