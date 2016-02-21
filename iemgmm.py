@@ -263,7 +263,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
         # get missing data by imputation from the current model
         if sel_callback is not None:
             RD = 200
-            soften =  1./(1+np.exp(-(it-12.5)/2.5))
+            soften =  1./(1+np.exp(-(it-12.)/5))
             RDs = int(RD*soften)
             log_L2 = 0
             log_S2_mean = 0
@@ -309,8 +309,10 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
             if sel_callback is None:
                 break
             elif log_L_obs_ < log_L_obs:
-                break"""
-
+                break
+        """
+        if it > 5 and log_L_obs_ - log_L_obs < tol:
+            break
         log_L = log_L_
         log_L_obs = log_L_obs_
 
