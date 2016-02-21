@@ -194,9 +194,9 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=N
     # init function as generic call
     init_callback(gmm, K, data, covar)
 
-    return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, n_missing=n_missing, tol=tol, logfile=logfile)
+    return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, N_missing=n_missing, tol=tol, logfile=logfile)
 
-def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missing=None, tol=1e-3, logfile=None):
+def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missing=None, tol=1e-3, logfile=None):
     maxiter = max(100, gmm.K)
 
     # limit the pool to 8 workers: parallel implementation
@@ -217,13 +217,15 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
     V = np.linalg.det(gmm.covar)
 
     # save the M sums from the non-imputed data
-    A = np.empty(gmm.K)
-    M = np.empty((gmm.K, gmm.D))
-    C = np.empty((gmm.K, gmm.D, gmm.D))
+    A_ = np.empty(gmm.K)
+    M_ = np.empty((gmm.K, gmm.D))
+    C_ = np.empty((gmm.K, gmm.D, gmm.D))
+    P_ = np.empty(gmm.K)
     P = np.empty(gmm.K)
 
-    # same for imputed data: set below if needed
-    A2 = M2 = C2 = P2 = None
+    # "global" imputation variables
+    log_S2_mean = N_imp = N_guess = limiter = None
+    P2 = np.empty(gmm.K)
 
     if logfile is not None:
         logfile = open(logfile, 'w')
@@ -232,8 +234,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
     it = 0
     log_L = None
     log_L_obs = None
-    n_impute = None
-    n_guess = None
+    log_S_mean = None
     while it < maxiter: # limit loop in case of no convergence
 
         # compute p(i | k) for each k independently in the pool
@@ -249,15 +250,17 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
 
         # since log(0) isn't a good idea, need to restrict to N
         log_S[N] = np.log(S[N])
+        log_S_mean_ = log_S[N].mean()
         log_L_ = log_L_obs_ = log_S[N].sum()
+        N_ = N.sum()
 
         if gmm.verbose:
-            print ("%d\t%d\t%.4f" % (it, N.sum(), log_L_)),
+            print ("%d\t%d\t%.4f" % (it, N_, log_L_)),
 
         # perform sums for M step in the pool
         results = [pool.apply_async(_computeMSums, (gmm, k, data, log_p[k], log_S, neighborhood[k], T_inv[k])) for k in xrange(gmm.K)]
         for r in results:
-            k, A[k], M[k], C[k], P[k] = r.get()
+            k, A_[k], M_[k], C_[k], P_[k] = r.get()
 
         # need to do MC integral of p(missing | k):
         # get missing data by imputation from the current model
@@ -265,40 +268,60 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
             RD = 200
             soften =  1./(1+np.exp(-(it-12.)/5))
             RDs = int(RD*soften)
-            log_L2 = 0
-            log_S2_mean = 0
-            A2 = np.zeros(gmm.K)
-            M2 = np.zeros((gmm.K, gmm.D))
-            C2 = np.zeros((gmm.K, gmm.D, gmm.D))
-            P2 = np.zeros(gmm.K)
-            n_impute = 0
+            log_L2_ = 0
+            log_S2_mean_ = 0
+            A2_ = np.zeros(gmm.K)
+            M2_ = np.zeros((gmm.K, gmm.D))
+            C2_ = np.zeros((gmm.K, gmm.D, gmm.D))
+            P2_ = np.zeros(gmm.K)
+            N_imp_ = 0
 
-            results = [pool.apply_async(_computeIMSums, (gmm, sel_callback, len(data), n_missing, n_guess, cutoff, it*rd)) for rd in xrange(RDs)]
+            results = [pool.apply_async(_computeIMSums, (gmm, sel_callback, N_, N_missing, N_guess, cutoff, limiter, it*rd)) for rd in xrange(RDs)]
             for r in results:
-                A2_, M2_, C2_, P2_, log_L2_, log_S2_mean_, n_impute_ = r.get()
-                A2 += A2_
-                M2 += M2_
-                C2 += C2_
-                P2 += P2_
-                log_L2 += log_L2_
-                log_S2_mean += log_S2_mean_
-                n_impute += n_impute_
+                A2__, M2__, C2__, P2__, log_L2__, log_S2_mean__, N_imp__ = r.get()
+                A2_ += A2__
+                M2_ += M2__
+                C2_ += C2__
+                P2_ += P2__
+                log_L2_ += log_L2__
+                log_S2_mean_ += log_S2_mean__
+                N_imp_ += N_imp__
 
             if soften > 0 and RDs > 0:
-                A2 *= soften / RDs
-                M2 *= soften / RDs
-                C2 *= soften / RDs
-                P2 *= soften / RDs
-                log_S2_mean /= RDs
-                log_L2 *= soften / RDs
-                log_L_ += log_L2
-                n_impute = n_impute * soften / RDs
+                A2_ *= soften / RDs
+                M2_ *= soften / RDs
+                C2_ *= soften / RDs
+                P2_ *= soften / RDs
+                log_S2_mean_ /= RDs
+                log_L2_ *= soften / RDs
+                log_L_ += log_L2_
+                N_imp_ = N_imp_ * soften / RDs
 
-                # update n_guess with <n_impute>
-                n_guess = n_impute / soften
+                # update N_guess with <N_imp>
+                N_guess = N_imp_ / soften
 
                 if gmm.verbose:
-                    print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, n_impute, soften, log_L2, log_L_)),
+                    print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, N_imp_, soften, log_L2_, log_L_)),
+
+            # compute changes of log_S, log_S2, N_imp
+            # to check if imputation gets instable
+            if it > 0:
+                d_log_S_mean = log_S_mean_ - log_S_mean
+                d_log_S2_mean = log_S2_mean_ - log_S2_mean
+                d_N_imp = N_imp_ - N_imp
+                limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
+                # if above limit: determine which component(s) drive it
+                if d_N_imp > limit:
+                    P_o_ = P_.sum()
+                    P_m_ = P2_.sum()
+                    d_P_o = P_ - P
+                    d_P_m = P2_ - P2
+                    d_N_m = N_ / P_o_ * d_P_m - N_* P_m_ / P_o_**2 * d_P_o
+                    # d_N_imp = sum_k d_N_m
+                    limiter = limit / d_N_imp / (1-d_N_m)
+                    # cast into useable limits
+                    limiter[limiter <= 0] = 1
+                    limiter =  np.minimum(1, np.maximum(0, limiter))
 
         if gmm.verbose:
             print  ""
@@ -313,21 +336,28 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, n_missi
         """
         if it > 5 and log_L_obs_ - log_L_obs < tol:
             break
+
+        # update all important _ quantities for convergence test
         log_L = log_L_
         log_L_obs = log_L_obs_
+        P[:] = P_[:]
+        P2[:] = P2_[:]
+        log_S_mean = log_S_mean_
+        log_S2_mean = log_S2_mean_
+        N_imp = N_imp_
 
         if logfile is not None:
             # create dummies when there was no imputation
             if sel_callback is None:
-                logL2 = soften = n_impute = log_S2_mean = -1
+                logL2 = soften = N_imp = log_S2_mean = -1
                 P2 = np.ones_like(P)
-            logfile.write("%d\t%.3f\t%.4f\t%.4f\t%.4f\t%.1f\t%.6f\t%.4f\t%.4f" % (it, soften, log_L_, log_L_obs_, log_L2, N.sum(), n_impute,  log_S[N].mean(), log_S2_mean))
+            logfile.write("%d\t%.3f\t%.4f\t%.4f\t%.4f\t%.1f\t%.6f\t%.4f\t%.4f" % (it, soften, log_L_, log_L_obs_, log_L2_, N_, N_imp,  log_S_mean, log_S2_mean))
             for k in xrange(gmm.K):
                 logfile.write("\t%.3f\t%.4f\t%.4f" % (gmm.amp[k], np.log(P[k]), np.log(P2[k])))
             logfile.write("\n")
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A, M, C, P, N.sum(), w, A2, M2, C2, P2, n_impute)
+        _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_)
 
         # check new component volumes and reset sel when it grows by
         # more then 25%
@@ -478,16 +508,16 @@ def _computeMSums(gmm, k, data, log_p_k, log_S, neighborhood_k, T_inv_k=None):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return k, A_k, M_k, C_k, P_k
 
-def _computeIMSums(gmm, sel_callback, len_data, n_missing, n_guess, cutoff, seed=None):
+def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, limiter=None, seed=None):
     # create imputated data
-    data2 = _I(gmm, sel_callback, len_data, n_missing=n_missing, n_guess=n_guess)
+    data2 = _I(gmm, sel_callback, len_data, n_missing=n_missing, N_guess=N_guess, limiter=limiter)
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
     C2 = np.zeros((gmm.K, gmm.D, gmm.D))
     P2 = np.zeros(gmm.K)
     log_L2 = 0
     log_S2_mean = 0
-    n_impute = len(data2)
+    N_imp = len(data2)
 
     if len(data2):
         # similar setup as above, but since imputated points
@@ -511,12 +541,22 @@ def _computeIMSums(gmm, sel_callback, len_data, n_missing, n_guess, cutoff, seed
             # with small imputation sets: neighborhood2[k] might be empty
             if neighborhood2[k] is None or neighborhood2[k].size:
                 k, A2[k], M2[k], C2[k], P2[k] = _computeMSums(gmm, k, data2, log_p2[k], log_S2, neighborhood2[k])
-    return A2, M2, C2, P2, log_L2, log_S2_mean, n_impute
+    return A2, M2, C2, P2, log_L2, log_S2_mean, N_imp
 
-def _I(gmm, sel_callback, len_data=None, n_missing=None, n_guess=None, alpha=0.05):
+def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, limiter=None, alpha=0.05):
     # create imputation sample from the current model
+
+    # if limiter is in place: modify gmm in place to affect number
+    # if imputation points drawn for each component
+    if limiter is not None:
+        amp_ = np.copy(gmm.amp)
+        gmm.amp *= limiter
+        gmm.amp /= gmm.amp.sum()
     if n_missing is not None:
-        return gmm.draw(size=n_missing, sel_callback=sel_callback, invert_callback=True)
+        sample =  gmm.draw(size=n_missing, sel_callback=sel_callback, invert_callback=True)
+        if limiter is not None:
+            gmm.amp[:] = amp_[:]
+        return sample
     else:
         if len_data is None:
             raise RuntimeError("I: need len_data when n_missing is None!")
@@ -529,8 +569,8 @@ def _I(gmm, sel_callback, len_data=None, n_missing=None, n_guess=None, alpha=0.0
         # N: current guess of the whole sample, of which we can only
         # see the observable fraction len_data
         N = len_data
-        if n_guess is not None:
-            N += n_guess
+        if N_guess is not None:
+            N += N_guess
         while True:
             # draw N without any selection
             sample = gmm.draw(N)
@@ -538,6 +578,8 @@ def _I(gmm, sel_callback, len_data=None, n_missing=None, n_guess=None, alpha=0.0
             sel = sel_callback(sample)
             N_o = sel.sum() # predicted observed
             if lower <= N_o and N_o <= upper:
+                if limiter is not None:
+                    gmm.amp[:] = amp_[:]
                 return sample[sel==False]
             else:
                 # update N assuming N_o/N is ~correct and independent of N

@@ -101,7 +101,7 @@ def plotTraces(filename='logfile.txt'):
     ax.plot(rw[:,0], N/P_o * gradf(np.exp(rw[:,17])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,16])), label='2')
     ax.plot(rw[:,0], limit*np.ones_like(rw[:,0]), 'k:')
     ax.plot(rw[:,0], gradf(rw[:,6]), 'k-', label='1+2+3')
-    ax.set_ylabel(r'$dN_{o,k}/dt$')
+    ax.set_ylabel(r'$dN_{m,k}/dt$')
     ax.legend(frameon=False)
 
     ax = fig.add_subplot(515)
