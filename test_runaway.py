@@ -50,6 +50,7 @@ def plotResults(orig, data, gmm, patch=None):
 
 def plotTraces(filename='logfile.txt'):
     rw = np.loadtxt(filename)
+    print imp.mean
 
     grad = np.eye(len(rw))
     grad[0,0] = 0
@@ -85,7 +86,6 @@ def plotTraces(filename='logfile.txt'):
     ax.plot(rw[:,0], rw[:,5] * gradf(rw[:,7]), label='N*d<lnL_o>/dt')
     ax.plot(rw[:,0], rw[:,6] * gradf(rw[:,8]), label='N_m*d<lnL_m>/dt')
     ax.plot(rw[:,0], gradf(rw[:,6]) * rw[:,8], label='<lnL_m>dN_m/dt')
-    ax.plot(rw[:,0], rw[:,5] * gradf(rw[:,7]) + rw[:,6] * gradf(rw[:,8]) + gradf(rw[:,6]) * rw[:,8], 'k--', label='cont')
     ax.plot(rw[:,0], gradf(rw[:,2]), 'k-', label='dlnL/dt')
     ax.legend(frameon=False)
 
@@ -148,7 +148,7 @@ def getCut(coords):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = 42
+    seed = 4
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = True

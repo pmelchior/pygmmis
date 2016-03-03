@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import datetime
 from functools import partial
+from multiprocessing import Pool
+
 
 def plotResults(data, sel, gmm, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -76,10 +78,11 @@ def getCut(coords):
 
 if __name__ == '__main__':
 
-    # set up RNG
+    # set up RNG and worker pool
     seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
+    pool =  Pool()
     verbose = False
 
     # draw N points from 3-component GMM

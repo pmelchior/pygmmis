@@ -226,6 +226,11 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
     # "global" imputation variables
     log_S2_mean = N_imp = N_guess = limiter = None
     A2 = np.empty(gmm.K)
+    A2_ = None
+    M2_ = None
+    C2_ = None
+    P2_ = None
+    N_imp_ = None
 
     if logfile is not None:
         logfile = open(logfile, 'w')
@@ -305,23 +310,29 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
 
             # compute changes of log_S, log_S2, N_imp
             # to check if imputation gets instable
-            if it > 0:
+            if it > 5:
                 d_log_S_mean = log_S_mean_ - log_S_mean
                 d_log_S2_mean = log_S2_mean_ - log_S2_mean
                 d_N_imp = N_imp_ - N_imp
                 limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
                 # if above limit: determine which component(s) drive it
-                if d_N_imp > limit:
+                if True:#d_N_imp > limit:
                     A_o_ = A_.sum()
                     A_m_ = A2_.sum()
                     d_A_o = A_ - A
                     d_A_m = A2_ - A2
                     d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
-                    limiter = limit / d_N_m
-                    # cast into useable limits
-                    limiter[limiter <= 0] = 1
-                    limiter =  np.minimum(1, np.maximum(0, limiter))
-                    
+                    if limiter is None:
+                        limiter = np.ones(gmm.K)
+                    troubled = d_N_m  / limit >= 1
+                    # unfreeze component that isn't troubled
+                    limiter[troubled == False] = 1
+                    print d_N_m / limit, troubled,
+                    # freeze amplitude at value before trouble
+                    new_A = (A_ + A2_) / (N_ + N_imp_)
+                    limiter[troubled] = np.minimum(limiter[troubled]*(1-d_N_imp/N_imp), gmm.amp[troubled] / new_A[troubled])
+                    print limiter
+
         if gmm.verbose:
             print  ""
 
@@ -333,6 +344,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             elif log_L_obs_ < log_L_obs:
                 break
         """
+
         if it > 5 and log_L_obs_ - log_L_obs < tol:
             break
 
@@ -340,10 +352,11 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         log_L = log_L_
         log_L_obs = log_L_obs_
         A[:] = A_[:]
-        A2[:] = A2_[:]
         log_S_mean = log_S_mean_
-        log_S2_mean = log_S2_mean_
-        N_imp = N_imp_
+        if sel_callback is not None:
+            A2[:] = A2_[:]
+            log_S2_mean = log_S2_mean_
+            N_imp = N_imp_
 
         if logfile is not None:
             # create dummies when there was no imputation
