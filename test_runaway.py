@@ -190,7 +190,6 @@ if __name__ == '__main__':
     # IEMGMM with imputation, incorporating errors
     logfile = "logfile.txt"
     start = datetime.datetime.now()
-    rng = RandomState()
     imp = iemgmm.fit(data, covar=covar, K=K, w=0.1, cutoff=10, sel_callback=cb, init_callback=init_cb, logfile=logfile, verbose=verbose, n_missing=None)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
