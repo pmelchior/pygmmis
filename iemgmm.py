@@ -310,30 +310,30 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
 
             # compute changes of log_S, log_S2, N_imp
             # to check if imputation gets instable
-            if it > 5:
+            if it > 0: # need to wait out the first iteration
                 d_log_S_mean = log_S_mean_ - log_S_mean
                 d_log_S2_mean = log_S2_mean_ - log_S2_mean
                 d_N_imp = N_imp_ - N_imp
+                # limit is upper bound for d/dt N_imp such that d/dt L_tot = 0
                 limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
-                # if above limit: determine which component(s) drive it
-                # so that they can be frozed in the M step
-                if d_N_imp > 0:
-                    A_o_ = A_.sum()
-                    A_m_ = A2_.sum()
-                    d_A_o = A_ - A
-                    d_A_m = A2_ - A2
-                    d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
-                    troubled_ = d_N_m  / limit >= 1
-                    # see if we can softly unthaw components that are not
-                    # troubled anymore
-                    if troubled is not None:
-                        improved = troubled & (troubled_ == False)
-                        # allow increase of from A2 to A2_ in proportion to
-                        # room under the limit (i.e. d_N_m / limit)
-                        A2_[improved] = np.minimum(A2_[improved], A2[improved] + A2_[improved]*(1 - np.maximum(0, d_N_m[improved]/limit)))
-                        # need to correct N_imp_, otherwise normalization wrong
-                        N_imp_ *= A2_.sum() / A_m_
-                    troubled = troubled_
+                # determine which component(s) drive imputation
+                # if they exceed limit, they will be frozed in the M step
+                A_o_ = A_.sum()
+                A_m_ = A2_.sum()
+                d_A_o = A_ - A
+                d_A_m = A2_ - A2
+                d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
+                troubled_ = d_N_m  / limit >= 1
+                # see if we can softly unthaw components that are not
+                # troubled anymore
+                if troubled is not None:
+                    improved = troubled & (troubled_ == False)
+                    # allow increase of from A2 to A2_ in proportion to
+                    # room under the limit (i.e. d_N_m / limit)
+                    A2_[improved] = np.minimum(A2_[improved], A2[improved] + A2_[improved]*(1 - np.maximum(0, d_N_m[improved]/limit)))
+                    # need to correct N_imp_, otherwise normalization wrong
+                    N_imp_ *= A2_.sum() / A_m_
+                troubled = troubled_
 
         if gmm.verbose:
             print  ""
