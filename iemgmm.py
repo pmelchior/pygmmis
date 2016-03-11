@@ -340,6 +340,9 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
 
         # convergence test:
         if it > 5 and log_L_obs_ - log_L_obs < tol:
+            if gmm.verbose:
+                print "likelihood descreased: stopping and reverting to previous model."
+            gmm = gmm_
             break
 
         # update all important _ quantities for convergence test
@@ -377,6 +380,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         S[:] = 0
         N[:] = 0
         it += 1
+        gmm_ = gmm # backup if next step gets worse
     if logfile is not None:
         logfile.close()
     return gmm
