@@ -177,14 +177,22 @@ def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.rando
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
         if gmm.verbose:
-            print "initializing spheres with s=%.2f" % s
+            print "initializing spheres with s=%.2f in data domain" % s
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
 def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.random):
     gmm.amp[:] = np.ones(K)/K
     # initialize components around data points with uncertainty s
     refs = rng.randint(0, len(data), size=K)
-    gmm.mean[:,:] = data[refs] + rng.normal(0, s, size=(gmm.K,3))
+    if s is None:
+        from scipy.special import gamma
+        min_pos = data.min(axis=0)
+        max_pos = data.max(axis=0)
+        vol_data = np.prod(max_pos-min_pos)
+        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
+        if gmm.verbose:
+            print "initializing spheres with s=%.2f near data points" % s
+    gmm.mean[:,:] = data[refs] + rng.normal(0, s, size=(gmm.K,data.shape[1]))
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
 
@@ -271,7 +279,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         # get missing data by imputation from the current model
         if sel_callback is not None:
             RD = 200
-            soften =  1./(1+np.exp(-(it-10.)/4))
+            soften =  1./(1+np.exp(-(it-4.)/2))
             RDs = int(RD*soften)
             log_L2_ = 0
             log_S2_mean_ = 0
