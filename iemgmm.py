@@ -316,13 +316,24 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                 d_N_imp = N_imp_ - N_imp
                 limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
                 # if above limit: determine which component(s) drive it
+                # so that they can be frozed in the M step
                 if d_N_imp > 0:
                     A_o_ = A_.sum()
                     A_m_ = A2_.sum()
                     d_A_o = A_ - A
                     d_A_m = A2_ - A2
                     d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
-                    troubled = d_N_m  / limit >= 1
+                    troubled_ = d_N_m  / limit >= 1
+                    # see if we can softly unthaw components that are not
+                    # troubled anymore
+                    if troubled is not None:
+                        improved = troubled & (troubled_ == False)
+                        # allow increase of from A2 to A2_ in proportion to
+                        # room under the limit (i.e. d_N_m / limit)
+                        A2_[improved] = np.minimum(A2_[improved], A2[improved] + A2_[improved]*(1 - np.maximum(0, d_N_m[improved]/limit)))
+                        # need to correct N_imp_, otherwise normalization wrong
+                        N_imp_ *= A2_.sum() / A_m_
+                    troubled = troubled_
 
         if gmm.verbose:
             print  ""
