@@ -4,6 +4,7 @@ import iemgmm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.lines as lines
 import datetime
 from functools import partial
 
@@ -12,8 +13,8 @@ def plotResults(orig, data, gmm, patch=None):
     ax = fig.add_subplot(111, aspect='equal')
 
     # plot inner and outer points
-    ax.plot(orig[:,0], orig[:,1], 'bo', mec='None')
-    ax.plot(data[:,0], data[:,1], 'o', mfc='None', mec='b')
+    ax.plot(orig[:,0], orig[:,1], 'o', mfc='r', mec='None')
+    ax.plot(data[:,0], data[:,1], 'o', mfc='b', mec='None')
 
     # prediction
     B = 100
@@ -108,13 +109,6 @@ def plotTraces(filename='logfile.txt'):
     ax.plot(rw[:,0], rw[:,1], 'k-', label='soften')
     ax.set_ylabel('soften')
 
-    #ax.plot(rw[:,0], limit / 3 / (N/P_o * gradf(np.exp(rw[:,11])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,10]))), label='0')
-    #ax.plot(rw[:,0], limit / 3 / (N/P_o * gradf(np.exp(rw[:,14])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,13]))), label='1')
-    #ax.plot(rw[:,0], limit / 3 / (N/P_o * gradf(np.exp(rw[:,17])) - N*P_m / P_o**2 * gradf(np.exp(rw[:,16]))), label='2')
-    #ax.plot(rw[:,0], np.minimum(1, limit / gradf(rw[:,6])), 'k-')
-    #ax.set_ylabel('dampening')
-
-
     ax.set_xlabel('iteration')
     plt.subplots_adjust(hspace=0.02, bottom=0.06, right=0.95,  top=0.99)
     plt.show()
@@ -138,17 +132,36 @@ def getHalfDensity(coords, rng=np.random):
 
 def getTaperedDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
-    mask[rng.rand(coords.shape[0]) < coords[:,0]/7] = 0
+    mask[rng.rand(coords.shape[0]) < coords[:,0]/8] = 0
     return mask
 
 def getCut(coords):
     return (coords[:,0] < 5)
 
+def getSelection(type="hole", rng=np.random):
+    if type == "hole":
+        cb = getHole
+        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+    if type == "box":
+        cb = getBox
+        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
+    if type == "boxWithHole":
+        cb = getBoxWithHole
+        ps = [patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted'),
+            patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')]
+    if type == "cut":
+        cb = getCut
+        ps = lines.Line2D([5, 5],[-5, 15], ls='dotted', color='b')
+    if type == "tapered":
+        cb = partial(getTaperedDensity, rng=rng)
+        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
+    return cb, ps
+
 
 if __name__ == '__main__':
 
     # set up RNG
-    seed = 4
+    seed = None
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = True
@@ -173,11 +186,12 @@ if __name__ == '__main__':
     K = 3
 
     # limit data to within the box
-    cb = getHole
-    ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+    cb = getTaperedDensity
+    ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
+        #patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
 
     # add isotropic errors on data
-    disp = 0.8
+    disp = 0.1
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     sel = cb(noisy)
     data = noisy[sel]
@@ -185,7 +199,7 @@ if __name__ == '__main__':
 
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
-    init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
+    init_cb = partial(iemgmm.initializeFromDataAtRandom, rng=rng)
 
     # IEMGMM with imputation, incorporating errors
     logfile = "logfile.txt"
