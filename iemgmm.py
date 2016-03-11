@@ -224,7 +224,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
     A = np.empty(gmm.K)
 
     # "global" imputation variables
-    log_S2_mean = N_imp = N_guess = limiter = None
+    log_S2_mean = N_imp = N_guess = troubled = None
     A2 = np.empty(gmm.K)
     A2_ = None
     M2_ = None
@@ -271,7 +271,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         # get missing data by imputation from the current model
         if sel_callback is not None:
             RD = 200
-            soften =  1./(1+np.exp(-(it-12.)/5))
+            soften =  1./(1+np.exp(-(it-10.)/4))
             RDs = int(RD*soften)
             log_L2_ = 0
             log_S2_mean_ = 0
@@ -281,7 +281,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             P2_ = np.zeros(gmm.K)
             N_imp_ = 0
 
-            results = [pool.apply_async(_computeIMSums, (gmm, sel_callback, N_, N_missing, N_guess, cutoff, limiter, it*rd)) for rd in xrange(RDs)]
+            results = [pool.apply_async(_computeIMSums, (gmm, sel_callback, N_, N_missing, N_guess, cutoff, it*rd)) for rd in xrange(RDs)]
             for r in results:
                 A2__, M2__, C2__, P2__, log_L2__, log_S2_mean__, N_imp__ = r.get()
                 A2_ += A2__
@@ -316,35 +316,18 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                 d_N_imp = N_imp_ - N_imp
                 limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
                 # if above limit: determine which component(s) drive it
-                if True:#d_N_imp > limit:
+                if d_N_imp > 0:
                     A_o_ = A_.sum()
                     A_m_ = A2_.sum()
                     d_A_o = A_ - A
                     d_A_m = A2_ - A2
                     d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
-                    if limiter is None:
-                        limiter = np.ones(gmm.K)
                     troubled = d_N_m  / limit >= 1
-                    # unfreeze component that isn't troubled
-                    limiter[troubled == False] = 1
-                    print d_N_m / limit, troubled,
-                    # freeze amplitude at value before trouble
-                    new_A = (A_ + A2_) / (N_ + N_imp_)
-                    limiter[troubled] = np.minimum(limiter[troubled]*(1-d_N_imp/N_imp), gmm.amp[troubled] / new_A[troubled])
-                    print limiter
 
         if gmm.verbose:
             print  ""
 
         # convergence test:
-        """
-        if it > 5 and log_L_ - log_L < tol:
-            if sel_callback is None:
-                break
-            elif log_L_obs_ < log_L_obs:
-                break
-        """
-
         if it > 5 and log_L_obs_ - log_L_obs < tol:
             break
 
@@ -369,7 +352,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             logfile.write("\n")
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_)
+        _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_, troubled)
 
         # check new component volumes and reset sel when it grows by
         # more then 25%
@@ -452,7 +435,7 @@ def _logsum(l):
         c = overflow
     return np.log(np.exp(l + c).sum()) - c
 
-def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None):
+def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None, troubled=None):
 
     # if imputation was run
     if A2 is not None:
@@ -466,7 +449,27 @@ def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_po
         C += gmm.covar * frac_p_out[:,None,None]
 
     # the actual update
-    gmm.amp[:] = A / n_points
+    amp_ = A / n_points
+
+    # if there are troubled components: freeze their amplitude
+    # and reweight the others according to their free amplitudes
+    if troubled is not None and troubled.any():
+        if not troubled.all():
+            gmm.amp[troubled==False] = amp_[troubled==False]
+            # allow troubled components to decrease (unlinkely, but why not)
+            gmm.amp[troubled] = np.minimum(gmm.amp[troubled], amp_[troubled])
+            # sum over troubled and good components
+            sat = gmm.amp[troubled].sum()
+            sag = gmm.amp[troubled==False].sum()
+            # ensure sum_km amp_k =1, while fixing the troubled components
+            # Note: a simple amp /= amp.sum() does not work well because
+            # the troubled components rise, so that the others typically
+            # have less weight in the sum. This way the total sum of the
+            # troubled components is constant
+            gmm.amp[troubled==False] *= (1-sat) / sag
+    else:
+        gmm.amp[:] = amp_[:]
+
     gmm.mean[:,:] = M / A[:,None]
     if w > 0:
         # we assume w to be a lower bound of the isotropic dispersion,
@@ -520,9 +523,9 @@ def _computeMSums(gmm, k, data, log_p_k, log_S, neighborhood_k, T_inv_k=None):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return k, A_k, M_k, C_k, P_k
 
-def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, limiter=None, seed=None):
+def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, seed=None):
     # create imputated data
-    data2 = _I(gmm, sel_callback, len_data, n_missing=n_missing, N_guess=N_guess, limiter=limiter)
+    data2 = _I(gmm, sel_callback, len_data, n_missing=n_missing, N_guess=N_guess)
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
     C2 = np.zeros((gmm.K, gmm.D, gmm.D))
@@ -555,19 +558,10 @@ def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, limi
                 k, A2[k], M2[k], C2[k], P2[k] = _computeMSums(gmm, k, data2, log_p2[k], log_S2, neighborhood2[k])
     return A2, M2, C2, P2, log_L2, log_S2_mean, N_imp
 
-def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, limiter=None, alpha=0.05):
+def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, alpha=0.05):
     # create imputation sample from the current model
-
-    # if limiter is in place: modify gmm in place to affect number
-    # if imputation points drawn for each component
-    if limiter is not None:
-        amp_ = np.copy(gmm.amp)
-        gmm.amp *= limiter
-        gmm.amp /= gmm.amp.sum()
     if n_missing is not None:
         sample =  gmm.draw(size=n_missing, sel_callback=sel_callback, invert_callback=True)
-        if limiter is not None:
-            gmm.amp[:] = amp_[:]
         return sample
     else:
         if len_data is None:
@@ -590,8 +584,6 @@ def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, limiter=N
             sel = sel_callback(sample)
             N_o = sel.sum() # predicted observed
             if lower <= N_o and N_o <= upper:
-                if limiter is not None:
-                    gmm.amp[:] = amp_[:]
                 return sample[sel==False]
             else:
                 # update N assuming N_o/N is ~correct and independent of N
