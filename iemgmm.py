@@ -64,13 +64,7 @@ class GMM(object):
         Returns:
             None
         """
-        if kwargs is None:
-            kwargs = {"amp": self.amp, "mean": self.mean, "covar": self.covar}
-        else:
-            kwargs['amp'] = self.amp
-            kwargs['mean'] = self.mean
-            kwargs['covar'] = self.covar
-        np.savez(filename, **kwargs)
+        np.savez(filename, amp=self.amp, mean=self.mean, covar=self.covar, **kwargs)
 
     def draw(self, size=1, sel_callback=None, invert_callback=False, rng=np.random):
         # draw indices for components given amplitudes
@@ -123,8 +117,9 @@ class GMM(object):
         import parmap
         pool = multiprocessing.Pool()
         chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
-        for k, log_p_k in zip(xrange(self.K), parmap.map(self.logL_k, xrange(self.K), data, covar, pool=pool, chunksize=chunksize)):
-            log_p[k,:] = log_p_k
+        k = 0
+        for log_p[k,:] in parmap.map(self.logL_k, xrange(self.K), data, covar, pool=pool, chunksize=chunksize):
+             k += 1
         pool.close()
         return self.logsumLogX(log_p) # sum over all k
 
