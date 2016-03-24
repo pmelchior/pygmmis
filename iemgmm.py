@@ -94,7 +94,7 @@ class GMM(object):
                 samples = np.concatenate((samples[sel_], ssamples))
         return samples
 
-    def logL(self, data, covar=None, visible=None):
+    def logL(self, data, covar=None, relevant=None):
         """Log-likelihood of data given all (i.e. the sum of) GMM components
 
         If covar is None, this method returns
@@ -106,8 +106,8 @@ class GMM(object):
         Args:
             data:   (D,) or (N, D) test coordinates
             covar:  (D, D) or (N, D, D) covariance matrix of data
-            visible: set of components "visible" for any x in data
-                     see getVisibleComponents()
+            relevant: iterable of components relevant for data points
+                      see getRelevantComponents()
 
         Returns:
             (1,) or (N, 1) log(L), depending on shape of data
@@ -117,14 +117,14 @@ class GMM(object):
         pool = multiprocessing.Pool()
         chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
 
-        if visible is None:
+        if relevant is None:
             log_p = np.empty((self.K, len(data)))
-            visible = xrange(self.K)
+            relevant = xrange(self.K)
         else:
             log_p = np.empty((len(visible), len(data)))
 
         k = 0
-        for log_p[k,:] in parmap.map(self.logL_k, visible, data, covar, False, pool=pool, chunksize=chunksize):
+        for log_p[k,:] in parmap.map(self.logL_k, relevant, data, covar, False, pool=pool, chunksize=chunksize):
              k += 1
         pool.close()
         return self.logsumLogX(log_p) # sum over all k
@@ -146,19 +146,23 @@ class GMM(object):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
-    def getVisibleComponents(self, data, covar=None, cutoff=5):
+    def getRelevantComponents(self, data, covar=None, cutoff=5):
+        # this uses all components that have at least one point in data within
+        # chi2 cutoff. less precise but faster methods (e.g. tree-based NN)
+        # could replace this if needed
+
         import multiprocessing
         import parmap
         pool = multiprocessing.Pool()
         chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
         k = 0
-        visible = set()
+        relevant = set()
         for chi2 in parmap.map(self.logL_k, xrange(self.K), data, covar, True, pool=pool, chunksize=chunksize):
             if (chi2 > cutoff).any():
-                visible.add(k)
+                relevant.add(k)
             k += 1
         pool.close()
-        return visible
+        return relevant
 
     @staticmethod
     def logsumLogX(logX):
