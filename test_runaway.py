@@ -91,8 +91,6 @@ def plotTraces(filename='logfile.txt'):
     ax.legend(frameon=False)
 
     limit = -1. / rw[:,8] * (rw[:,5] * gradf(rw[:,7]) + rw[:,6] * gradf(rw[:,8]))
-
-
     ax = fig.add_subplot(514)
     A_o = np.exp(rw[:,10]) + np.exp(rw[:,13]) + np.exp(rw[:,16])
     A_m = np.exp(rw[:,11]) + np.exp(rw[:,14]) + np.exp(rw[:,17])
@@ -191,7 +189,7 @@ if __name__ == '__main__':
         #patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
 
     # add isotropic errors on data
-    disp = 0.1
+    disp = 0.2
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     sel = cb(noisy)
     data = noisy[sel]

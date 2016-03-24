@@ -1,10 +1,10 @@
 import numpy as np
-import multiprocessing
 import ctypes
 
 # for multiprocessing: use shared arrays to avoid copies for each thread
 # http://stackoverflow.com/questions/5549190/
 def createShared(a, dtype=ctypes.c_double):
+    import multiprocessing
     shared_array_base = multiprocessing.Array(dtype, a.size)
     shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
     shared_array[:] = a.flatten()
@@ -205,11 +205,11 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=N
     return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, N_missing=n_missing, tol=tol, logfile=logfile)
 
 def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missing=None, tol=1e-3, logfile=None):
-    maxiter = max(100, gmm.K)
-
-    # limit the pool to 8 workers: parallel implementation
-    # not efficient beyond that due to work load for main thread
-    pool = multiprocessing.Pool(processes=min(8, multiprocessing.cpu_count()))
+    # set up pool
+    import multiprocessing
+    import parmap
+    pool = multiprocessing.Pool()
+    chunksize = int(np.ceil(gmm.K*1./multiprocessing.cpu_count()))
 
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
@@ -248,14 +248,14 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
     log_L = None
     log_L_obs = None
     log_S_mean = None
+    maxiter = max(100, gmm.K)
     while it < maxiter: # limit loop in case of no convergence
 
         # compute p(i | k) for each k independently in the pool
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
-        results = [pool.apply_async(_E, (gmm, k, data, covar, neighborhood[k], cutoff)) for k in xrange(gmm.K)]
-        for r in results:
-            k, log_p[k], neighborhood[k], T_inv[k] = r.get()
+        for k, log_p[k], neighborhood[k], T_inv[k] in \
+        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
             if gmm.verbose >= 2:
@@ -271,9 +271,9 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             print ("%d\t%d\t%.4f" % (it, N_, log_L_)),
 
         # perform sums for M step in the pool
-        results = [pool.apply_async(_computeMSums, (gmm, k, data, log_p[k], log_S, neighborhood[k], T_inv[k])) for k in xrange(gmm.K)]
-        for r in results:
-            k, A_[k], M_[k], C_[k], P_[k] = r.get()
+        for k, A_[k], M_[k], C_[k], P_[k] in \
+        parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
+            pass
 
         # need to do MC integral of p(missing | k):
         # get missing data by imputation from the current model
@@ -289,9 +289,9 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             P2_ = np.zeros(gmm.K)
             N_imp_ = 0
 
-            results = [pool.apply_async(_computeIMSums, (gmm, sel_callback, N_, N_missing, N_guess, cutoff, it*rd)) for rd in xrange(RDs)]
-            for r in results:
-                A2__, M2__, C2__, P2__, log_L2__, log_S2_mean__, N_imp__ = r.get()
+            chunksize_I = int(np.ceil(RDs)*1./multiprocessing.cpu_count())
+            for A2__, M2__, C2__, P2__, log_L2__, log_S2_mean__, N_imp__ in \
+            parmap.map(_computeIMSums, it*np.arange(RDs), gmm, sel_callback, N_, N_missing, N_guess, cutoff, pool=pool, chunksize=chunksize_I):
                 A2_ += A2__
                 M2_ += M2__
                 C2_ += C2__
@@ -391,9 +391,10 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         gmm_ = gmm # backup if next step gets worse
     if logfile is not None:
         logfile.close()
+    pool.close()
     return gmm
 
-def _E(gmm, k, data, covar=None, neighborhood_k=None, cutoff=None):
+def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
     if cutoff is None or neighborhood_k is None:
@@ -505,7 +506,7 @@ def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_po
     else:
         gmm.covar[:,:,:] = C / A[:,None,None]
 
-def _computeMSums(gmm, k, data, log_p_k, log_S, neighborhood_k, T_inv_k=None):
+def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # needed for imputation correction: P_k = sum_i p_ik
     P_k = np.exp(_logsum(log_p_k))
 
@@ -546,9 +547,10 @@ def _computeMSums(gmm, k, data, log_p_k, log_S, neighborhood_k, T_inv_k=None):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return k, A_k, M_k, C_k, P_k
 
-def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, seed=None):
+def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff):
     # create imputated data
     data2 = _I(gmm, sel_callback, len_data, n_missing=n_missing, N_guess=N_guess)
+    covar2 = T2_inv = None
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
     C2 = np.zeros((gmm.K, gmm.D, gmm.D))
@@ -568,7 +570,7 @@ def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, seed
         # run E now on data2
         # then combine respective sums in M step
         for k in xrange(gmm.K):
-            k, log_p2[k], neighborhood2[k], _ = _E(gmm, k, data2, cutoff=cutoff)
+            k, log_p2[k], neighborhood2[k], _ = _E(k, neighborhood2[k], gmm, data2, covar2, cutoff=cutoff)
             S2[neighborhood2[k]] += np.exp(log_p2[k])
 
         log_S2 = np.log(S2)
@@ -578,7 +580,7 @@ def _computeIMSums(gmm, sel_callback, len_data, n_missing, N_guess, cutoff, seed
         for k in xrange(gmm.K):
             # with small imputation sets: neighborhood2[k] might be empty
             if neighborhood2[k] is None or neighborhood2[k].size:
-                k, A2[k], M2[k], C2[k], P2[k] = _computeMSums(gmm, k, data2, log_p2[k], log_S2, neighborhood2[k])
+                k, A2[k], M2[k], C2[k], P2[k] = _computeMSums(k, neighborhood2[k], log_p2[k], T2_inv, gmm, data2, log_S2)
     return A2, M2, C2, P2, log_L2, log_S2_mean, N_imp
 
 def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, alpha=0.05):

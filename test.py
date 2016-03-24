@@ -121,7 +121,7 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("hole", rng=rng)
+    cb, ps = getSelection("tapered", rng=rng)
 
     # add isotropic errors on data
     disp = 0.8
@@ -140,7 +140,6 @@ if __name__ == '__main__':
     R = 10
     imp = iemgmm.GMM(K=K*R, D=D)
 
-    """
     # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -179,7 +178,7 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
-    """
+
     # 4) IEMGMM with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
