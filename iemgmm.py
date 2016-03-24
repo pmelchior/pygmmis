@@ -347,7 +347,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             print  ""
 
         # convergence test:
-        if it > 5 and log_L_obs_ - log_L_obs < tol:
+        if it > 5 and log_S_mean_ - log_S_mean < tol:
             if gmm.verbose:
                 print "likelihood descreased: stopping and reverting to previous model."
             gmm = gmm_
