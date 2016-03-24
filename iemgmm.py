@@ -133,13 +133,12 @@ class GMM(object):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         dx = data - self.mean[k]
         if covar is None:
-            chi2 = np.einsum('...j,j...', dx, np.dot(np.linalg.inv(self.covar[k]), dx.T))
-            # prevent tiny negative determinants to mess up
-            (sign, logdet) = np.linalg.slogdet(self.covar[k])
+            T_k = self.covar[k]
         else:
             T_k = self.covar[k] + covar
-            chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(T_k), dx)
-            (sign, logdet) = np.linalg.slogdet(T_k)
+        chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(T_k), dx)
+        # prevent tiny negative determinants to mess up
+        (sign, logdet) = np.linalg.slogdet(T_k)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
     @staticmethod
