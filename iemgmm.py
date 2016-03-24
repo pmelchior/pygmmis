@@ -249,6 +249,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
     log_L_obs = None
     log_S_mean = None
     maxiter = max(100, gmm.K)
+    conv_iter = 5
     while it < maxiter: # limit loop in case of no convergence
 
         # compute p(i | k) for each k independently in the pool
@@ -280,6 +281,15 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         # need to do MC integral of p(missing | k):
         # get missing data by imputation from the current model
         if sel_callback is not None:
+
+            # with imputation the observed data logL can decrease:
+            # revert to previous model is that is that case
+            if it > conv_iter and log_S_mean_ < log_S_mean:
+                if gmm.verbose:
+                    print "\nmean likelihood decreased: stopping reverting to previous model."
+                gmm = gmm_
+                break
+
             RD = 200
             soften =  1./(1+np.exp(-(it-4.)/2))
             RDs = int(RD*soften)
@@ -345,23 +355,6 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                     N_imp_ *= A2_.sum() / A_m_
                 troubled = troubled_
 
-        # convergence test:
-        if it > 5 and log_S_mean_ - log_S_mean < tol:
-            if gmm.verbose:
-                print "mean likelihood decreased: stopping reverting to previous model."
-            gmm = gmm_
-            break
-
-        # update all important _ quantities for convergence test
-        log_L = log_L_
-        log_L_obs = log_L_obs_
-        A[:] = A_[:]
-        log_S_mean = log_S_mean_
-        if sel_callback is not None:
-            A2[:] = A2_[:]
-            log_S2_mean = log_S2_mean_
-            N_imp = N_imp_
-
         if logfile is not None:
             # create dummies when there was no imputation
             if sel_callback is None:
@@ -374,6 +367,22 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
 
         # perform M step with M-sums of data and imputations runs
         _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_, troubled)
+
+        # convergence test:
+        if it > conv_iter and log_S_mean_ - log_S_mean < tol:
+            if gmm.verbose:
+                print "mean likelihood converged within tolerance %r: stopping here." % tol
+            break
+
+        # update all important _ quantities for convergence test(s)
+        log_L = log_L_
+        log_L_obs = log_L_obs_
+        A[:] = A_[:]
+        log_S_mean = log_S_mean_
+        if sel_callback is not None:
+            A2[:] = A2_[:]
+            log_S2_mean = log_S2_mean_
+            N_imp = N_imp_
 
         # check new component volumes and reset sel when it grows by
         # more then 25%
