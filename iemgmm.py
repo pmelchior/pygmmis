@@ -268,7 +268,9 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         N_ = N.sum()
 
         if gmm.verbose:
-            print ("%d\t%d\t%.4f" % (it, N_, log_L_)),
+            print ("%d\t%d\t%.4f\t%.4f" % (it, N_, log_L_, log_S_mean_)),
+            if sel_callback is None:
+                print ""
 
         # perform sums for M step in the pool
         for k, A_[k], M_[k], C_[k], P_[k] in \
@@ -314,7 +316,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                 N_guess = N_imp_ / soften
 
                 if gmm.verbose:
-                    print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, N_imp_, soften, log_L2_, log_L_)),
+                    print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, N_imp_, soften, log_L2_, log_L_))
 
             # compute changes of log_S, log_S2, N_imp
             # to check if imputation gets instable
@@ -343,13 +345,10 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                     N_imp_ *= A2_.sum() / A_m_
                 troubled = troubled_
 
-        if gmm.verbose:
-            print  ""
-
         # convergence test:
         if it > 5 and log_S_mean_ - log_S_mean < tol:
             if gmm.verbose:
-                print "likelihood descreased: stopping and reverting to previous model."
+                print "mean likelihood decreased: stopping reverting to previous model."
             gmm = gmm_
             break
 
