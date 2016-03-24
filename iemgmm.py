@@ -39,7 +39,6 @@ copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 class GMM(object):
     def __init__(self, K=1, D=1, verbose=False):
         self.verbose = verbose
-
         self.amp = np.zeros((K))
         self.mean = np.empty((K,D))
         self.covar = np.empty((K,D,D))
@@ -98,11 +97,11 @@ class GMM(object):
     def logL(self, data, covar=None):
         """Log-likelihood of data given all (i.e. the sum of) GMM components
 
-        See appendix A of Bovy, Hogg, Roweis (2009).
-
-        If covar is set, the data error will be incorporated, eq. 9, resulting
-        in log(sum_k(p(y | k))). Otherwise this method return log(sum_k(p(x | k)))
-        of the truth values.
+        If covar is None, this method returns
+            log(sum_k(p(x | k)))
+        of the data values x. If covar is set, the method returns
+            log(sum_k(p(y | k))),
+        where y = x + noise and noise ~ N(0, covar).
 
         Args:
             data:   (D,) or (N, D) test coordinates
