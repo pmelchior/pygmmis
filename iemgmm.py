@@ -119,8 +119,13 @@ class GMM(object):
         """
 
         log_p = np.empty((self.K, len(data)))
-        for k in xrange(self.K):
-            log_p[k,:] = self.logL_k(k, data, covar=covar)
+        import multiprocessing
+        import parmap
+        pool = multiprocessing.Pool()
+        chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
+        for k, log_p_k in zip(xrange(self.K), parmap.map(self.logL_k, xrange(self.K), data, covar, pool=pool, chunksize=chunksize)):
+            log_p[k,:] = log_p_k
+        pool.close()
         return self.logsumLogX(log_p) # sum over all k
 
     def logL_k(self, k, data, covar=None):
@@ -437,15 +442,6 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
     return k, np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
-
-def logL(gmm, data, covar=None, cutoff=None):
-    S = np.zeros(len(data))
-    for k in xrange(gmm.K):
-        # to minimize the components with tiny p(x|k) in sum:
-        # only use those within cutoff
-        k, log_p_k, neighborhood_k, T_inv_k = _E(gmm, k, data, covar=covar, cutoff=cutoff)
-        S[neighborhood_k] += np.exp(log_p_k)
-    return np.log(S)
 
 def _logsum(l):
     """Computes log of a sum, given the log of the elements.
