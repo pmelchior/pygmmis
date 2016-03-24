@@ -94,7 +94,7 @@ class GMM(object):
                 samples = np.concatenate((samples[sel_], ssamples))
         return samples
 
-    def logL(self, data, covar=None):
+    def logL(self, data, covar=None, visible=None):
         """Log-likelihood of data given all (i.e. the sum of) GMM components
 
         If covar is None, this method returns
@@ -106,34 +106,59 @@ class GMM(object):
         Args:
             data:   (D,) or (N, D) test coordinates
             covar:  (D, D) or (N, D, D) covariance matrix of data
+            visible: set of components "visible" for any x in data
+                     see getVisibleComponents()
 
         Returns:
             (1,) or (N, 1) log(L), depending on shape of data
         """
-
-        log_p = np.empty((self.K, len(data)))
         import multiprocessing
         import parmap
         pool = multiprocessing.Pool()
         chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
+
+        if visible is None:
+            log_p = np.empty((self.K, len(data)))
+            visible = xrange(self.K)
+        else:
+            log_p = np.empty((len(visible), len(data)))
+
         k = 0
-        for log_p[k,:] in parmap.map(self.logL_k, xrange(self.K), data, covar, pool=pool, chunksize=chunksize):
+        for log_p[k,:] in parmap.map(self.logL_k, visible, data, covar, False, pool=pool, chunksize=chunksize):
              k += 1
         pool.close()
         return self.logsumLogX(log_p) # sum over all k
 
-    def logL_k(self, k, data, covar=None):
+    def logL_k(self, k, data, covar=None, chi2_only=False):
         # compute p(x | k)
-        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         dx = data - self.mean[k]
         if covar is None:
             T_k = self.covar[k]
         else:
             T_k = self.covar[k] + covar
         chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(T_k), dx)
+
+        if chi2_only:
+            return chi2
+
         # prevent tiny negative determinants to mess up
         (sign, logdet) = np.linalg.slogdet(T_k)
+        log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
+
+    def getVisibleComponents(self, data, covar=None, cutoff=5):
+        import multiprocessing
+        import parmap
+        pool = multiprocessing.Pool()
+        chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
+        k = 0
+        visible = set()
+        for chi2 in parmap.map(self.logL_k, xrange(self.K), data, covar, True, pool=pool, chunksize=chunksize):
+            if (chi2 > cutoff).any():
+                visible.add(k)
+            k += 1
+        pool.close()
+        return visible
 
     @staticmethod
     def logsumLogX(logX):
