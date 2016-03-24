@@ -383,6 +383,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
             A2[:] = A2_[:]
             log_S2_mean = log_S2_mean_
             N_imp = N_imp_
+            gmm_ = gmm # backup if next step gets worse (note: not gmm = gmm_!)
 
         # check new component volumes and reset sel when it grows by
         # more then 25%
@@ -396,7 +397,7 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         S[:] = 0
         N[:] = 0
         it += 1
-        gmm_ = gmm # backup if next step gets worse
+
     if logfile is not None:
         logfile.close()
     pool.close()
