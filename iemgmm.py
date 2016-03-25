@@ -114,20 +114,10 @@ class GMM(object):
         """
         import multiprocessing
         import parmap
-        pool = multiprocessing.Pool()
         chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
-
-        if relevant is None:
-            log_p = np.empty((self.K, len(data)))
-            relevant = xrange(self.K)
-        else:
-            log_p = np.empty((len(visible), len(data)))
-
-        k = 0
-        for log_p[k,:] in parmap.map(self.logL_k, relevant, data, covar, False, pool=pool, chunksize=chunksize):
-             k += 1
-        pool.close()
-        return self.logsumLogX(log_p) # sum over all k
+        # log p (x | k) for each k
+        log_p = parmap.map(self.logL_k, xrange(self.K), data, covar, False, chunksize=chunksize)
+        return self.logsumLogX(np.array(log_p)) # sum over all k
 
     def logL_k(self, k, data, covar=None, chi2_only=False):
         # compute p(x | k)
@@ -145,24 +135,6 @@ class GMM(object):
         (sign, logdet) = np.linalg.slogdet(T_k)
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
-
-    def getRelevantComponents(self, data, covar=None, cutoff=5):
-        # this uses all components that have at least one point in data within
-        # chi2 cutoff. less precise but faster methods (e.g. tree-based NN)
-        # could replace this if needed
-
-        import multiprocessing
-        import parmap
-        pool = multiprocessing.Pool()
-        chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
-        k = 0
-        relevant = set()
-        for chi2 in parmap.map(self.logL_k, xrange(self.K), data, covar, True, pool=pool, chunksize=chunksize):
-            if (chi2 > cutoff).any():
-                relevant.add(k)
-            k += 1
-        pool.close()
-        return relevant
 
     @staticmethod
     def logsumLogX(logX):

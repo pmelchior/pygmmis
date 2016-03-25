@@ -121,7 +121,7 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("tapered", rng=rng)
+    cb, ps = getSelection("hole", rng=rng)
 
     # add isotropic errors on data
     disp = 0.8
