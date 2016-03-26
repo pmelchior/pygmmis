@@ -292,12 +292,14 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
         # compute p(i | k) for each k independently in the pool
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
-        for k, log_p[k], neighborhood[k], T_inv[k] in \
+        k = 0
+        for log_p[k], neighborhood[k], T_inv[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
             if gmm.verbose >= 2:
                 print "  k=%d: amp=%.3f pos=(%.1f, %.1f) s=%.2f |I| = %d <S> = %.3f" % (k, gmm.amp[k], gmm.mean[k][0], gmm.mean[k][1], np.linalg.det(gmm.covar[k])**(0.5/gmm.D), log_p[k].size, np.log(S[neighborhood[k]]).mean())
+            k += 1
 
         # since log(0) isn't a good idea, need to restrict to N
         log_S[N] = np.log(S[N])
@@ -311,9 +313,10 @@ def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missi
                 print ""
 
         # perform sums for M step in the pool
-        for k, A_[k], M_[k], C_[k], P_[k] in \
+        k = 0
+        for A_[k], M_[k], C_[k], P_[k] in \
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
-            pass
+            k += 1
 
         # need to do MC integral of p(missing | k):
         # get missing data by imputation from the current model
@@ -473,7 +476,7 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return k, np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
 
 def _logsum(l):
     """Computes log of a sum, given the log of the elements.
@@ -582,7 +585,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         b_k -= gmm.mean[k]
         B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
-    return k, A_k, M_k, C_k, P_k
+    return A_k, M_k, C_k, P_k
 
 def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff):
     # create imputated data
@@ -607,7 +610,7 @@ def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff
         # run E now on data2
         # then combine respective sums in M step
         for k in xrange(gmm.K):
-            k, log_p2[k], neighborhood2[k], _ = _E(k, neighborhood2[k], gmm, data2, covar2, cutoff=cutoff)
+            log_p2[k], neighborhood2[k], _ = _E(k, neighborhood2[k], gmm, data2, covar2, cutoff=cutoff)
             S2[neighborhood2[k]] += np.exp(log_p2[k])
 
         log_S2 = np.log(S2)
@@ -617,7 +620,7 @@ def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff
         for k in xrange(gmm.K):
             # with small imputation sets: neighborhood2[k] might be empty
             if neighborhood2[k] is None or neighborhood2[k].size:
-                k, A2[k], M2[k], C2[k], P2[k] = _computeMSums(k, neighborhood2[k], log_p2[k], T2_inv, gmm, data2, log_S2)
+                A2[k], M2[k], C2[k], P2[k] = _computeMSums(k, neighborhood2[k], log_p2[k], T2_inv, gmm, data2, log_S2)
     return A2, M2, C2, P2, log_L2, log_S2_mean, N_imp
 
 def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, alpha=0.05):
