@@ -245,15 +245,12 @@ def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.ran
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, n_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False, logfile=None):
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False, logfile=None):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     # init function as generic call
     init_callback(gmm, K, data, covar)
 
-    return _run_EM(gmm, data, covar=covar, w=w, cutoff=cutoff, sel_callback=sel_callback, N_missing=n_missing, tol=tol, logfile=logfile)
-
-def _run_EM(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, N_missing=None, tol=1e-3, logfile=None):
     # set up pool
     import multiprocessing
     import parmap
