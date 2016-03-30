@@ -49,6 +49,42 @@ def plotResults(orig, data, gmm, patch=None):
     plt.tight_layout()
     plt.show()
 
+def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
+    fig = plt.figure(figsize=(6,6))
+    ax = fig.add_subplot(111, aspect='equal')
+
+    # plot inner and outer points
+    ax.plot(orig[:,0], orig[:,1], 'o', mfc='r', mec='None')
+    ax.plot(data[:,0], data[:,1], 'o', mfc='b', mec='None')
+
+    # prediction
+    B = 40
+    x,y = np.meshgrid(np.linspace(-5,15,B), np.linspace(-5,15,B))
+    coords = np.dstack((x.flatten(), y.flatten()))[0]
+
+    # compute sum_k(p_k(x)) for all x
+    coverage = getCoverage(gmm, coords, sel_callback=sel_callback).reshape((B,B))
+    cs = ax.contourf(coverage, 10, extent=(-5,15,-5,15), cmap=plt.cm.Greys)
+    for c in cs.collections:
+        c.set_edgecolor(c.get_facecolor())
+
+    # plot boundary
+    if patch is not None:
+        import copy
+        if hasattr(patch, '__iter__'):
+            for p in patch:
+                ax.add_artist(copy.copy(p))
+        else:
+            ax.add_artist(copy.copy(patch))
+
+    ax.set_xlim(-5, 15)
+    ax.set_ylim(-5, 15)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    plt.tight_layout()
+    plt.show()
+
+
 def getBox(coords):
     box_limits = np.array([[0,0],[10,10]])
     return (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
@@ -92,6 +128,45 @@ def getSelection(type="hole", rng=np.random):
         ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
     return cb, ps
 
+def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
+    # create a new gmm with randomly drawn components at each point in coords:
+    # estimate how this gmm can cover the volume spanned by coords
+    if sel_callback is None:
+        return np.ones(len(coords))
+    else:
+        coverage = np.zeros(len(coords))
+        from sklearn.neighbors import KDTree
+        for r in xrange(repeat):
+            sel = sel_callback(coords)
+            inv_sel = sel == False
+            coverage[sel] += 1./repeat
+
+            gmm_ = iemgmm.GMM(K=gmm.K, D=gmm.D)
+            gmm_.amp = np.random.rand(K)
+            gmm_.amp /= gmm_.amp.sum()
+            gmm_.covar = gmm.covar
+
+            if rotate:
+                # use random rotations for each component covariance
+                # from http://www.mathworks.com/matlabcentral/newsreader/view_thread/298500
+                # since we don't care about parity flips we don't have to check
+                # the determinant of R (and hence don't need R)
+                for k in xrange(gmm_.K):
+                    Q,_ = np.linalg.qr(np.random.normal(size=(gmm.D, gmm.D)), mode='complete')
+                    gmm_.covar[k] = np.dot(Q, np.dot(gmm_.covar[k], Q.T))
+
+            inside = coords[sel]
+            outside = coords[inv_sel]
+            outside_cov = coverage[inv_sel]
+            tree = KDTree(inside)
+            closest_inside = tree.query(outside, k=1, return_distance=False).flatten()
+            unique_closest = np.unique(closest_inside)
+            for c in unique_closest:
+                gmm_.mean[:] = inside[c]
+                closest_to_c = (closest_inside == c)
+                outside_cov[closest_to_c] += gmm_(outside[closest_to_c]) / gmm_(inside[c]) / repeat
+            coverage[inv_sel] = outside_cov
+    return coverage
 
 if __name__ == '__main__':
 
@@ -121,7 +196,7 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("hole", rng=rng)
+    cb, ps = getSelection("boxWithHole", rng=rng)
 
     # add isotropic errors on data
     disp = 0.8
@@ -191,3 +266,4 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
+    plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
