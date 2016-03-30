@@ -144,7 +144,13 @@ class GMM(object):
                 samples = np.concatenate((samples[sel_], ssamples))
         return samples
 
-    def logL(self, data, covar=None, relevant=None):
+    def __call__(self, coords, covar=None, relevant=None, as_log=False):
+        if as_log:
+            return self.logL(coords, covar=covar, relevant=relevant)
+        else:
+            return np.exp(self.logL(coords, covar=covar, relevant=relevant))
+
+    def logL(self, coords, covar=None, relevant=None):
         """Log-likelihood of data given all (i.e. the sum of) GMM components
 
         If covar is None, this method returns
@@ -154,7 +160,7 @@ class GMM(object):
         where y = x + noise and noise ~ N(0, covar).
 
         Args:
-            data:   (D,) or (N, D) test coordinates
+            coords: (D,) or (N, D) test coordinates
             covar:  (D, D) or (N, D, D) covariance matrix of data
             relevant: iterable of components relevant for data points
                       see getRelevantComponents()
@@ -166,12 +172,12 @@ class GMM(object):
         import parmap
         chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
         # log p (x | k) for each k
-        log_p = parmap.map(self.logL_k, xrange(self.K), data, covar, False, chunksize=chunksize)
+        log_p = parmap.map(self.logL_k, xrange(self.K), coords, covar, False, chunksize=chunksize)
         return self.logsumLogX(np.array(log_p)) # sum over all k
 
-    def logL_k(self, k, data, covar=None, chi2_only=False):
+    def logL_k(self, k, coords, covar=None, chi2_only=False):
         # compute p(x | k)
-        dx = data - self.mean[k]
+        dx = coords - self.mean[k]
         if covar is None:
             T_k = self.covar[k]
         else:

@@ -22,9 +22,9 @@ def plotResults(orig, data, gmm, patch=None):
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
     # compute sum_k(p_k(x)) for all x
-    logL_i = gmm.logL(coords)
+    p = gmm(coords).reshape((B,B))
     # for better visibility use arcshinh stretch
-    p = np.arcsinh(np.exp(logL_i.reshape((B,B)))/1e-4)
+    p = np.arcsinh(p/1e-4)
     cs = ax.contourf(p, 10, extent=(-5,15,-5,15), cmap=plt.cm.Greys)
     for c in cs.collections:
         c.set_edgecolor(c.get_facecolor())
@@ -39,7 +39,7 @@ def plotResults(orig, data, gmm, patch=None):
             ax.add_artist(copy.copy(patch))
 
     # add complete data logL to plot
-    logL = gmm.logL(orig).mean()
+    logL = gmm(orig, as_log=True).mean()
     ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
 
     ax.set_xlim(-5, 15)
