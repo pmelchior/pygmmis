@@ -169,11 +169,27 @@ class GMM(object):
             (1,) or (N, 1) log(L), depending on shape of data
         """
         import multiprocessing
-        import parmap
-        chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
-        # log p (x | k) for each k
-        log_p = parmap.map(self.logL_k, xrange(self.K), coords, covar, False, chunksize=chunksize)
-        return self.logsumLogX(np.array(log_p)) # sum over all k
+        #import parmap
+        cpu_count = multiprocessing.cpu_count()
+        chunksize = int(np.ceil(self.K*1./cpu_count))
+        # Instead log p (x | k) for each k (which is huge)
+        # compute it in stages: first for each chunk, then sum over all chunks
+        chunks = [(i*chunksize, min(self.K, (i+1)*chunksize)) for i in xrange(min(self.K, cpu_count))]
+        pool = multiprocessing.Pool()
+        results = [pool.apply_async(self._logsum_chunk, (chunk, coords, covar)) for chunk in chunks]
+        log_p_y_chunk = []
+        for r in results:
+            log_p_y_chunk.append(r.get())
+        pool.close()
+        return self.logsumLogX(np.array(log_p_y_chunk)) # sum over all chunks = all k
+
+    def _logsum_chunk(self, chunk, coords, covar=None):
+        # helper function to reduce the memory requirement of logL
+        log_p_y_k = np.empty((chunk[1]-chunk[0], len(coords)))
+        for i in xrange(chunk[1] - chunk[0]):
+            k = chunk[0] + i
+            log_p_y_k[i,:] = self.logL_k(k, coords, covar=covar)
+        return self.logsumLogX(log_p_y_k)
 
     def logL_k(self, k, coords, covar=None, chi2_only=False):
         # compute p(x | k)
