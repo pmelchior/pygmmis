@@ -254,8 +254,15 @@ def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.ran
 def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False, logfile=None):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
-    # init function as generic call
-    init_callback(gmm, K, data, covar)
+
+    if sel_callback is None:
+        # init function as generic call
+        init_callback(gmm, K, data, covar)
+
+    # run default EM first
+    else:
+        gmm = fit(data, covar=covar, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, verbose=verbose)
+        gmm.covar *= 4
 
     # set up pool
     import multiprocessing
@@ -284,7 +291,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     A = np.empty(gmm.K)
 
     # "global" imputation variables
-    log_S2_mean = N_imp = N_guess = troubled = None
+    log_S2_mean = N_imp = N_guess = None
     A2 = np.empty(gmm.K)
     A2_ = None
     M2_ = None
@@ -345,8 +352,8 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 gmm = gmm_
                 break
 
-            RD = 200
-            soften =  1./(1+np.exp(-(it-4.)/2))
+            RD = 4
+            soften =  1.
             RDs = int(RD*soften)
             log_L2_ = 0
             log_S2_mean_ = 0
@@ -383,45 +390,11 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 if gmm.verbose:
                     print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, N_imp_, soften, log_L2_, log_L_))
 
-            # compute changes of log_S, log_S2, N_imp
-            # to check if imputation gets instable
-            if it > 0: # need to wait out the first iteration
-                d_log_S_mean = log_S_mean_ - log_S_mean
-                d_log_S2_mean = log_S2_mean_ - log_S2_mean
-                d_N_imp = N_imp_ - N_imp
-                # limit is upper bound for d/dt N_imp such that d/dt L_tot = 0
-                limit = -1./(log_S_mean_) * (N_ * d_log_S_mean + N_imp_ * d_log_S2_mean)
-                # determine which component(s) drive imputation
-                # if they exceed limit, they will be frozed in the M step
-                A_o_ = A_.sum()
-                A_m_ = A2_.sum()
-                d_A_o = A_ - A
-                d_A_m = A2_ - A2
-                d_N_m = N_ / A_o_ * d_A_m - N_* A_m_ / A_o_**2 * d_A_o
-                troubled_ = d_N_m  / limit >= 1
-                # see if we can softly unthaw components that are not
-                # troubled anymore
-                if troubled is not None:
-                    improved = troubled & (troubled_ == False)
-                    # allow increase of from A2 to A2_ in proportion to
-                    # room under the limit (i.e. d_N_m / limit)
-                    A2_[improved] = np.minimum(A2_[improved], A2[improved] + A2_[improved]*(1 - np.maximum(0, d_N_m[improved]/limit)))
-                    # need to correct N_imp_, otherwise normalization wrong
-                    N_imp_ *= A2_.sum() / A_m_
-                troubled = troubled_
-
         if logfile is not None:
-            # create dummies when there was no imputation
-            if sel_callback is None:
-                logL2 = soften = N_imp = log_S2_mean = -1
-                P2 = np.ones_like(P)
-            logfile.write("%d\t%.3f\t%.4f\t%.4f\t%.4f\t%.1f\t%.6f\t%.4f\t%.4f" % (it, soften, log_L_, log_L_obs_, log_L2_, N_, N_imp,  log_S_mean, log_S2_mean))
-            for k in xrange(gmm.K):
-                logfile.write("\t%.3f\t%.4f\t%.4f" % (gmm.amp[k], np.log(A_[k]), np.log(A2_[k])))
-            logfile.write("\n")
+            pass
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_, troubled)
+        _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_)
 
         # convergence test:
         if it > conv_iter and log_S_mean_ - log_S_mean < tol:
@@ -514,52 +487,17 @@ def _logsum(l):
         c = overflow
     return np.log(np.exp(l + c).sum()) - c
 
-def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None, troubled=None):
-
-    # if imputation was run
-    if A2 is not None:
-        A += A2
-        M += M2
-        C += C2
-        n_points = n_points2 + n_points
-
-        # imputation correction
-        frac_p_out = P2 / (P + P2)
-        C += gmm.covar * frac_p_out[:,None,None]
-
-    # the actual update
-    amp_ = A / n_points
-
-    # if there are troubled components: freeze their amplitude
-    # and reweight the others according to their free amplitudes
-    if troubled is not None and troubled.any():
-        if not troubled.all():
-            gmm.amp[troubled==False] = amp_[troubled==False]
-            # allow troubled components to decrease (unlinkely, but why not)
-            gmm.amp[troubled] = np.minimum(gmm.amp[troubled], amp_[troubled])
-            # sum over troubled and good components
-            sat = gmm.amp[troubled].sum()
-            sag = gmm.amp[troubled==False].sum()
-            # ensure sum_km amp_k =1, while fixing the troubled components
-            # Note: a simple amp /= amp.sum() does not work well because
-            # the troubled components rise, so that the others typically
-            # have less weight in the sum. This way the total sum of the
-            # troubled components is constant
-            gmm.amp[troubled==False] *= (1-sat) / sag
-    else:
-        gmm.amp[:] = amp_[:]
-
-    gmm.mean[:,:] = M / A[:,None]
-    if w > 0:
-        # we assume w to be a lower bound of the isotropic dispersion,
-        # C_k = w^2 I + ...
-        # then eq. 38 in Bovy et al. only ~works for N = 0 because of the
-        # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
-        # On average, q_j = N/K, so we'll adopt that to correct.
-        w_eff = w**2 * (n_points*1./gmm.K + 1)
-        gmm.covar[:,:,:] = (C + w_eff*np.eye(gmm.D)[None,:,:]) / (A + 1)[:,None,None]
-    else:
+def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None):
+    gmm.amp[:] = A / n_points
+    if A2 is None:
+        gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C / A[:,None,None]
+    else:
+        print gmm.mean
+        print M / A[:,None]
+        print M2 / A2[:,None]
+        gmm.mean[:,:] = M / A[:,None] + gmm.mean[:,:] - M2 / A2[:,None]
+        gmm.covar[:,:,:] = C / A[:,None,None] + gmm.covar[:,:,:] - C2 / A2[:,None,None]
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # needed for imputation correction: P_k = sum_i p_ik
@@ -604,7 +542,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
 
 def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff):
     # create imputated data
-    data2 = _I(gmm, sel_callback, len_data, n_missing=n_missing, N_guess=N_guess)
+    data2 = gmm.draw(len_data*10, sel_callback=sel_callback)
     covar2 = T2_inv = None
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
@@ -637,34 +575,3 @@ def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff
             if neighborhood2[k] is None or neighborhood2[k].size:
                 A2[k], M2[k], C2[k], P2[k] = _computeMSums(k, neighborhood2[k], log_p2[k], T2_inv, gmm, data2, log_S2)
     return A2, M2, C2, P2, log_L2, log_S2_mean, N_imp
-
-def _I(gmm, sel_callback, len_data=None, n_missing=None, N_guess=None, alpha=0.05):
-    # create imputation sample from the current model
-    if n_missing is not None:
-        sample =  gmm.draw(size=n_missing, sel_callback=sel_callback, invert_callback=True)
-        return sample
-    else:
-        if len_data is None:
-            raise RuntimeError("I: need len_data when n_missing is None!")
-
-        # confidence interval for Poisson variate len_data
-        from scipy.stats import chi2
-        lower = 0.5*chi2.ppf(alpha/2, 2*len_data)
-        upper = 0.5*chi2.ppf(1 - alpha/2, 2*len_data + 2)
-
-        # N: current guess of the whole sample, of which we can only
-        # see the observable fraction len_data
-        N = len_data
-        if N_guess is not None:
-            N += N_guess
-        while True:
-            # draw N without any selection
-            sample = gmm.draw(N)
-            # check if observed fraction is compatible with Poisson(len_data)
-            sel = sel_callback(sample)
-            N_o = sel.sum() # predicted observed
-            if lower <= N_o and N_o <= upper:
-                return sample[sel==False]
-            else:
-                # update N assuming N_o/N is ~correct and independent of N
-                N = max(int(N*1.0/N_o * len_data), len_data)
