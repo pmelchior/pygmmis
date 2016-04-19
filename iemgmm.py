@@ -168,14 +168,13 @@ class GMM(object):
         Returns:
             (1,) or (N, 1) log(L), depending on shape of data
         """
-        import multiprocessing
-        #import parmap
-        cpu_count = multiprocessing.cpu_count()
-        chunksize = int(np.ceil(self.K*1./cpu_count))
         # Instead log p (x | k) for each k (which is huge)
         # compute it in stages: first for each chunk, then sum over all chunks
-        chunks = [(i*chunksize, min(self.K, (i+1)*chunksize)) for i in xrange(min(self.K, cpu_count))]
+        import multiprocessing
         pool = multiprocessing.Pool()
+        cpu_count = multiprocessing.cpu_count()
+        chunksize = int(np.ceil(self.K*1./cpu_count))
+        chunks = [(i*chunksize, min(self.K, (i+1)*chunksize)) for i in xrange(min(self.K, cpu_count))]
         results = [pool.apply_async(self._logsum_chunk, (chunk, coords, covar)) for chunk in chunks]
         log_p_y_chunk = []
         for r in results:
