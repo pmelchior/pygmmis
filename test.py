@@ -107,7 +107,7 @@ def getTaperedDensity(coords, rng=np.random):
     return mask
 
 def getCut(coords):
-    return (coords[:,0] < 5)
+    return (coords[:,0] < 7)
 
 def getSelection(type="hole", rng=np.random):
     if type == "hole":
@@ -122,7 +122,7 @@ def getSelection(type="hole", rng=np.random):
             patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')]
     if type == "cut":
         cb = getCut
-        ps = lines.Line2D([5, 5],[-5, 15], ls='dotted', color='b')
+        ps = lines.Line2D([7, 7],[-5, 15], ls='dotted', color='b')
     if type == "tapered":
         cb = partial(getTaperedDensity, rng=rng)
         ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
@@ -196,15 +196,18 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("boxWithHole", rng=rng)
+    cb, ps = getSelection("cut", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.8
+    disp = 0.01
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy)
     data = iemgmm.createShared(noisy[sel])
     covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
+
+    # plot data vs true model
+    plotResults(orig, data, gmm, patch=ps)
 
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
