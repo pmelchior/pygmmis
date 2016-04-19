@@ -480,7 +480,7 @@ def _logsum(l):
         c = overflow
     return np.log(np.exp(l + c).sum()) - c
 
-def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None, soften=0):
+def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, soften=0):
     gmm.amp[:] = A / n_points
     if soften == 0:
         gmm.mean[:,:] = M / A[:,None]
