@@ -171,7 +171,7 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = 40
+    seed = 42
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = False
@@ -196,7 +196,7 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("hole", rng=rng)
+    cb, ps = getSelection("cut", rng=rng)
 
     # add isotropic errors on data
     disp = 0.01
@@ -206,6 +206,10 @@ if __name__ == '__main__':
     data = iemgmm.createShared(noisy[sel])
     covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
 
+
+    # plot data vs true model
+    plotResults(orig, data, gmm, patch=ps)
+
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
     init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
@@ -214,7 +218,6 @@ if __name__ == '__main__':
     K = 3
     R = 10
     imp = iemgmm.GMM(K=K*R, D=D)
-
 
     # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
