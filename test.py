@@ -107,7 +107,7 @@ def getTaperedDensity(coords, rng=np.random):
     return mask
 
 def getCut(coords):
-    return (coords[:,0] < 5)
+    return (coords[:,0] < 7)
 
 def getSelection(type="hole", rng=np.random):
     if type == "hole":
@@ -122,7 +122,7 @@ def getSelection(type="hole", rng=np.random):
             patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')]
     if type == "cut":
         cb = getCut
-        ps = lines.Line2D([5, 5],[-5, 15], ls='dotted', color='b')
+        ps = lines.Line2D([7, 7],[-5, 15], ls='dotted', color='b')
     if type == "tapered":
         cb = partial(getTaperedDensity, rng=rng)
         ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
@@ -171,7 +171,7 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = 42
+    seed = 40
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = False
@@ -196,10 +196,10 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("boxWithHole", rng=rng)
+    cb, ps = getSelection("hole", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.8
+    disp = 0.01
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy)
@@ -215,6 +215,7 @@ if __name__ == '__main__':
     R = 10
     imp = iemgmm.GMM(K=K*R, D=D)
 
+
     # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -228,6 +229,7 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
 
+    """
     # 2) IEMGMM without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -240,10 +242,11 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
-
+    """
     # 3) IEMGMM with imputation, igoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
+    l = None
     for r in xrange(R):
         imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
         ll = imp_.logL(data).mean()
@@ -254,6 +257,7 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
 
+    """
     # 4) IEMGMM with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -267,3 +271,4 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
     plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
+    """

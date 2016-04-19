@@ -269,15 +269,18 @@ def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.ran
 def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False, logfile=None):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
-
+    """
     if sel_callback is None:
         # init function as generic call
-        init_callback(gmm, K, data, covar)
+    """
+    init_callback(gmm, K, data, covar)
 
+    """
     # run default EM first
     else:
         gmm = fit(data, covar=covar, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, verbose=verbose)
         gmm.covar *= 4
+    """
 
     # set up pool
     import multiprocessing
@@ -299,20 +302,16 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     V = np.linalg.det(gmm.covar)
 
     # save the M sums from the non-imputed data
-    A_ = np.empty(gmm.K)
-    M_ = np.empty((gmm.K, gmm.D))
-    C_ = np.empty((gmm.K, gmm.D, gmm.D))
-    P_ = np.empty(gmm.K)
     A = np.empty(gmm.K)
+    M = np.empty((gmm.K, gmm.D))
+    C = np.empty((gmm.K, gmm.D, gmm.D))
+    P = np.empty(gmm.K)
 
-    # "global" imputation variables
-    log_S2_mean = N_imp = N_guess = None
+    # imputation variables, need to be global for final update
     A2 = np.empty(gmm.K)
-    A2_ = None
-    M2_ = None
-    C2_ = None
-    P2_ = None
-    N_imp_ = None
+    M2 = np.empty((gmm.K, gmm.D))
+    C2 = np.empty((gmm.K, gmm.D, gmm.D))
+    P2 = np.empty(gmm.K)
 
     if logfile is not None:
         logfile = open(logfile, 'w')
@@ -320,10 +319,9 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     # begin EM
     it = 0
     log_L = None
-    log_L_obs = None
-    log_S_mean = None
     maxiter = max(100, gmm.K)
     conv_iter = 5
+    soften = 0
     while it < maxiter: # limit loop in case of no convergence
 
         # compute p(i | k) for each k independently in the pool
@@ -341,7 +339,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # since log(0) isn't a good idea, need to restrict to N
         log_S[N] = np.log(S[N])
         log_S_mean_ = log_S[N].mean()
-        log_L_ = log_L_obs_ = log_S[N].sum()
+        log_L_ = log_S[N].sum()
         N_ = N.sum()
 
         if gmm.verbose:
@@ -351,7 +349,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
         # perform sums for M step in the pool
         k = 0
-        for A_[k], M_[k], C_[k], P_[k] in \
+        for A[k], M[k], C[k], P[k] in \
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
             k += 1
 
@@ -361,55 +359,35 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
             # with imputation the observed data logL can decrease:
             # revert to previous model is that is that case
-            if it > conv_iter and log_S_mean_ < log_S_mean:
+            if it > conv_iter and log_L_ < log_L:
                 if gmm.verbose:
                     print "\nmean likelihood decreased: stopping reverting to previous model."
                 gmm = gmm_
                 break
 
             RD = 4
-            soften =  1.
-            RDs = int(RD*soften)
-            log_L2_ = 0
-            log_S2_mean_ = 0
-            A2_ = np.zeros(gmm.K)
-            M2_ = np.zeros((gmm.K, gmm.D))
-            C2_ = np.zeros((gmm.K, gmm.D, gmm.D))
-            P2_ = np.zeros(gmm.K)
-            N_imp_ = 0
+            soften =  1./(1+np.exp(-(it-4.)/2))
 
-            chunksize_I = int(np.ceil(RDs)*1./multiprocessing.cpu_count())
-            for A2__, M2__, C2__, P2__, log_L2__, log_S2_mean__, N_imp__ in \
-            parmap.map(_computeIMSums, it*np.arange(RDs), gmm, sel_callback, N_, N_missing, N_guess, cutoff, pool=pool, chunksize=chunksize_I):
-                A2_ += A2__
-                M2_ += M2__
-                C2_ += C2__
-                P2_ += P2__
-                log_L2_ += log_L2__
-                log_S2_mean_ += log_S2_mean__
-                N_imp_ += N_imp__
+            A2[:] = 0
+            M2[:,:] = 0
+            C2[:,:,:] = 0
+            P2[:] = 0
+            chunksize_I = int(np.ceil(RD)*1./multiprocessing.cpu_count())
+            for A2_, M2_, C2_, P2_, log_L2_, log_S2_mean_, N_imp_ in \
+            parmap.map(_computeIMSums, it*np.arange(RD), gmm, sel_callback, N_, cutoff, pool=pool, chunksize=chunksize_I):
+                A2 += A2_ / RD
+                M2 += M2_ / RD
+                C2 += C2_ / RD
+                P2 += P2_ / RD
 
-            if soften > 0 and RDs > 0:
-                A2_ *= soften / RDs
-                M2_ *= soften / RDs
-                C2_ *= soften / RDs
-                P2_ *= soften / RDs
-                log_S2_mean_ /= RDs
-                log_L2_ *= soften / RDs
-                log_L_ += log_L2_
-                N_imp_ = N_imp_ * soften / RDs
-
-                # update N_guess with <N_imp>
-                N_guess = N_imp_ / soften
-
-                if gmm.verbose:
-                    print ("\t%d\t%d\t%.2f\t%.4f\t%.4f" % (RDs, N_imp_, soften, log_L2_, log_L_))
+            if gmm.verbose:
+                print ("\t%d\t%d\t%.2f\t%.4f" % (RD, N_imp_, soften, log_L2_))
 
         if logfile is not None:
             pass
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A_, M_, C_, P_, N_, w, A2_, M2_, C2_, P2_, N_imp_)
+        _M(gmm, A, M, C, P, N_, w, A2, M2, C2, P2, soften)
 
         # convergence test:
         if it > conv_iter and log_S_mean_ - log_S_mean < tol:
@@ -419,13 +397,8 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
-        log_L_obs = log_L_obs_
-        A[:] = A_[:]
         log_S_mean = log_S_mean_
         if sel_callback is not None:
-            A2[:] = A2_[:]
-            log_S2_mean = log_S2_mean_
-            N_imp = N_imp_
             gmm_ = gmm # backup if next step gets worse (note: not gmm = gmm_!)
 
         # check new component volumes and reset sel when it grows by
@@ -440,6 +413,11 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         S[:] = 0
         N[:] = 0
         it += 1
+
+    if sel_callback is not None:
+        F2 = A2 / gmm.amp
+        gmm.amp[:] /= F2[:] / F2.sum()
+        gmm.amp /= gmm.amp.sum()
 
     if logfile is not None:
         logfile.close()
@@ -502,17 +480,14 @@ def _logsum(l):
         c = overflow
     return np.log(np.exp(l + c).sum()) - c
 
-def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None):
+def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, n_points2=None, soften=0):
     gmm.amp[:] = A / n_points
-    if A2 is None:
+    if soften == 0:
         gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C / A[:,None,None]
     else:
-        print gmm.mean
-        print M / A[:,None]
-        print M2 / A2[:,None]
-        gmm.mean[:,:] = M / A[:,None] + gmm.mean[:,:] - M2 / A2[:,None]
-        gmm.covar[:,:,:] = C / A[:,None,None] + gmm.covar[:,:,:] - C2 / A2[:,None,None]
+        gmm.mean[:,:] = M / A[:,None] + soften*(gmm.mean[:,:] - M2 / A2[:,None])
+        gmm.covar[:,:,:] = C / A[:,None,None] + soften*(gmm.covar[:,:,:] - C2 / A2[:,None,None])
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # needed for imputation correction: P_k = sum_i p_ik
@@ -555,7 +530,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return A_k, M_k, C_k, P_k
 
-def _computeIMSums(seed, gmm, sel_callback, len_data, n_missing, N_guess, cutoff):
+def _computeIMSums(seed, gmm, sel_callback, len_data, cutoff):
     # create imputated data
     data2 = gmm.draw(len_data*10, sel_callback=sel_callback)
     covar2 = T2_inv = None
