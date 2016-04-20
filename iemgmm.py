@@ -365,7 +365,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 gmm = gmm_
                 break
 
-            RD = 4
+            RD = multiprocessing.cpu_count()
             soften =  1./(1+np.exp(-(it-4.)/2))
 
             A2[:] = 0
@@ -532,7 +532,8 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
 
 def _computeIMSums(seed, gmm, sel_callback, len_data, cutoff):
     # create imputated data
-    data2 = gmm.draw(len_data*10, sel_callback=sel_callback)
+    over = 4
+    data2 = gmm.draw(len_data*over, sel_callback=sel_callback)
     covar2 = T2_inv = None
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
@@ -564,4 +565,4 @@ def _computeIMSums(seed, gmm, sel_callback, len_data, cutoff):
             # with small imputation sets: neighborhood2[k] might be empty
             if neighborhood2[k] is None or neighborhood2[k].size:
                 A2[k], M2[k], C2[k], P2[k] = _computeMSums(k, neighborhood2[k], log_p2[k], T2_inv, gmm, data2, log_S2)
-    return A2, M2, C2, P2, log_L2, log_S2_mean, N_imp
+    return A2/over, M2/over, C2/over, P2/over, log_L2/over, log_S2_mean, N_imp/over
