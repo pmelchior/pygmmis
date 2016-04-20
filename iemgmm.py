@@ -366,7 +366,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 break
 
             RD = multiprocessing.cpu_count()
-            soften =  1./(1+np.exp(-(it-4.)/2))
+            soften =  1./(1+np.exp(-(it-8.)/4))
 
             A2[:] = 0
             M2[:,:] = 0
@@ -481,13 +481,28 @@ def _logsum(l):
     return np.log(np.exp(l + c).sum()) - c
 
 def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, soften=0):
+    # compute the new amplitude from the observed points only!
+    # adjustment for missing points at the very end
     gmm.amp[:] = A / n_points
+
+    # minimum covariance term?
+    if w > 0:
+        # we assume w to be a lower bound of the isotropic dispersion,
+        # C_k = w^2 I + ...
+        # then eq. 38 in Bovy et al. only ~works for N = 0 because of the
+        # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
+        # On average, q_j = N/K, so we'll adopt that to correct.
+        w_eff = w**2 * (n_points*1./gmm.K + 1)
+        C_ = (C + w_eff*np.eye(gmm.D)[None,:,:]) / (A + 1)[:,None,None]
+    else:
+        C_ = C / A[:,None,None]
+
     if soften == 0:
         gmm.mean[:,:] = M / A[:,None]
-        gmm.covar[:,:,:] = C / A[:,None,None]
+        gmm.covar[:,:,:] = C_
     else:
-        gmm.mean[:,:] = M / A[:,None] + soften*(gmm.mean[:,:] - M2 / A2[:,None])
-        gmm.covar[:,:,:] = C / A[:,None,None] + soften*(gmm.covar[:,:,:] - C2 / A2[:,None,None])
+        gmm.mean[:,:] = M / A[:,None] + soften * (gmm.mean[:,:] - M2 / A2[:,None])
+        gmm.covar[:,:,:] = C_ + soften * (gmm.covar[:,:,:] - C2 / A2[:,None,None])
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # needed for imputation correction: P_k = sum_i p_ik
@@ -532,7 +547,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
 
 def _computeIMSums(seed, gmm, sel_callback, len_data, cutoff):
     # create imputated data
-    over = 4
+    over = 10
     data2 = gmm.draw(len_data*over, sel_callback=sel_callback)
     covar2 = T2_inv = None
     A2 = np.zeros(gmm.K)
