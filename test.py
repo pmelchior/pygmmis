@@ -196,10 +196,10 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("box", rng=rng)
+    cb, ps = getSelection("boxWithHole", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.01
+    disp = 0.8
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy)
@@ -218,6 +218,7 @@ if __name__ == '__main__':
     R = 10
     imp = iemgmm.GMM(K=K*R, D=D)
 
+
     # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -231,6 +232,7 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
 
+    """
     # 2) IEMGMM without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -243,6 +245,7 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
+    """
 
     # 3) IEMGMM with imputation, igoring errors
     start = datetime.datetime.now()
