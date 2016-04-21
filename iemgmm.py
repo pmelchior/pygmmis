@@ -395,8 +395,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         gmm.amp[:] /= M0[:] / M0.sum()
         gmm.amp /= gmm.amp.sum()
 
-    if logfile is not None:
-        logfile.close()
     pool.close()
     return gmm
 
@@ -531,9 +529,9 @@ def _computeMoments(k, gmm, sel_callback=None, tol=1e-2):
     N = 1000
     Nmax = 100000
     d = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)
-    if len(d) == 0:
+    while len(d) <= 100:
         N *= 10
-        d = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)
+        d = np.concatenate((d, _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)))
     # selection affects component
     if len(d) < N * (1 - tol):
         # check if we have enough samples for accurate mean within tol
