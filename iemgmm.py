@@ -269,18 +269,14 @@ def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.ran
 def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False, logfile=None):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
-    """
     if sel_callback is None:
-        # init function as generic call
-    """
-    init_callback(gmm, K, data, covar)
-
-    """
-    # run default EM first
+        # init components
+        init_callback(gmm, K, data, covar)
     else:
+        # run default EM first
         gmm = fit(data, covar=covar, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, verbose=verbose)
+        # inflate covar to accommodate changes from selection
         gmm.covar *= 4
-    """
 
     # set up pool
     import multiprocessing
@@ -301,27 +297,25 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     # save volumes to see which components change
     V = np.linalg.det(gmm.covar)
 
-    # save the M sums from the non-imputed data
+    # save the M sums from observed data
     A = np.empty(gmm.K)
     M = np.empty((gmm.K, gmm.D))
     C = np.empty((gmm.K, gmm.D, gmm.D))
     P = np.empty(gmm.K)
 
-    # imputation variables, need to be global for final update
-    A2 = np.empty(gmm.K)
-    M2 = np.empty((gmm.K, gmm.D))
-    C2 = np.empty((gmm.K, gmm.D, gmm.D))
-    P2 = np.empty(gmm.K)
+    # moments of components under selection; need to be global for final update
+    M0 = M1 = M2 = None
+    if sel_callback is not None:
+        M0 = np.empty(gmm.K)
+        M1 = np.empty((gmm.K, gmm.D))
+        M2 = np.empty((gmm.K, gmm.D, gmm.D))
 
     if logfile is not None:
         logfile = open(logfile, 'w')
 
     # begin EM
     it = 0
-    log_L = None
     maxiter = max(100, gmm.K)
-    conv_iter = 5
-    soften = 0
     while it < maxiter: # limit loop in case of no convergence
 
         # compute p(i | k) for each k independently in the pool
@@ -332,18 +326,15 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
-            if gmm.verbose >= 2:
-                print "  k=%d: amp=%.3f pos=(%.1f, %.1f) s=%.2f |I| = %d <S> = %.3f" % (k, gmm.amp[k], gmm.mean[k][0], gmm.mean[k][1], np.linalg.det(gmm.covar[k])**(0.5/gmm.D), log_p[k].size, np.log(S[neighborhood[k]]).mean())
             k += 1
 
         # since log(0) isn't a good idea, need to restrict to N
         log_S[N] = np.log(S[N])
-        log_S_mean_ = log_S[N].mean()
-        log_L_ = log_S[N].sum()
+        log_L_ = log_S[N].mean()
         N_ = N.sum()
 
         if gmm.verbose:
-            print ("%d\t%d\t%.4f\t%.4f" % (it, N_, log_L_, log_S_mean_)),
+            print ("%d\t%d\t%.4f" % (it, N_, log_L_)),
             if sel_callback is None:
                 print ""
 
@@ -357,47 +348,39 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # get missing data by imputation from the current model
         if sel_callback is not None:
 
-            # with imputation the observed data logL can decrease:
-            # revert to previous model is that is that case
-            if it > conv_iter and log_L_ < log_L:
+            # with imputation the observed data logL can decrease.
+            # revert to previous model if that is the case
+            if it > 0 and log_L_ < log_L:
                 if gmm.verbose:
                     print "\nmean likelihood decreased: stopping reverting to previous model."
                 gmm = gmm_
                 break
 
-            RD = multiprocessing.cpu_count()
-            soften =  1./(1+np.exp(-(it-8.)/4))
-
-            A2[:] = 0
-            M2[:,:] = 0
-            C2[:,:,:] = 0
-            P2[:] = 0
-            chunksize_I = int(np.ceil(RD)*1./multiprocessing.cpu_count())
-            for A2_, M2_, C2_, P2_, log_L2_, log_S2_mean_, N_imp_ in \
-            parmap.map(_computeIMSums, it*np.arange(RD), gmm, sel_callback, N_, cutoff, pool=pool, chunksize=chunksize_I):
-                A2 += A2_ / RD
-                M2 += M2_ / RD
-                C2 += C2_ / RD
-                P2 += P2_ / RD
+            k = 0
+            for M0[k], M1[k], M2[k] in \
+            parmap.map(_computeMoments, xrange(gmm.K), gmm, sel_callback, pool=pool, chunksize=chunksize):
+                k += 1
 
             if gmm.verbose:
-                print ("\t%d\t%d\t%.2f\t%.4f" % (RD, N_imp_, soften, log_L2_))
+                if verbose >= 2:
+                    print ("\t%.2f" * gmm.K) % tuple(M0)
+                else:
+                    print (M0 < 1).sum()
 
         if logfile is not None:
             pass
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A, M, C, P, N_, w, A2, M2, C2, P2, soften)
+        _M(gmm, A, M, C, P, N_, w, M0, M1, M2)
 
         # convergence test:
-        if it > conv_iter and log_S_mean_ - log_S_mean < tol:
+        if it > 0 and log_L_ - log_L < tol:
             if gmm.verbose:
                 print "mean likelihood converged within tolerance %r: stopping here." % tol
             break
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
-        log_S_mean = log_S_mean_
         if sel_callback is not None:
             gmm_ = gmm # backup if next step gets worse (note: not gmm = gmm_!)
 
@@ -415,8 +398,8 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         it += 1
 
     if sel_callback is not None:
-        F2 = A2 / gmm.amp
-        gmm.amp[:] /= F2[:] / F2.sum()
+        # update component amplitudes for the missing fraction
+        gmm.amp[:] /= M0[:] / M0.sum()
         gmm.amp /= gmm.amp.sum()
 
     if logfile is not None:
@@ -480,7 +463,7 @@ def _logsum(l):
         c = overflow
     return np.log(np.exp(l + c).sum()) - c
 
-def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, soften=0):
+def _M(gmm, A, M, C, P, n_points, w=0., M0=None, M1=None, M2=None):
     # compute the new amplitude from the observed points only!
     # adjustment for missing points at the very end
     gmm.amp[:] = A / n_points
@@ -497,12 +480,12 @@ def _M(gmm, A, M, C, P, n_points, w=0., A2=None, M2=None, C2=None, P2=None, soft
     else:
         C_ = C / A[:,None,None]
 
-    if soften == 0:
+    if M0 is None:
         gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C_
     else:
-        gmm.mean[:,:] = M / A[:,None] + soften * (gmm.mean[:,:] - M2 / A2[:,None])
-        gmm.covar[:,:,:] = C_ + soften * (gmm.covar[:,:,:] - C2 / A2[:,None,None])
+        gmm.mean[:,:] = M / A[:,None] + gmm.mean[:,:] - M1[:,:]
+        gmm.covar[:,:,:] = C_ + gmm.covar[:,:,:] - M2[:,:,:]
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # needed for imputation correction: P_k = sum_i p_ik
@@ -545,39 +528,45 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return A_k, M_k, C_k, P_k
 
-def _computeIMSums(seed, gmm, sel_callback, len_data, cutoff):
-    # create imputated data
-    over = 10
-    data2 = gmm.draw(len_data*over, sel_callback=sel_callback)
-    covar2 = T2_inv = None
-    A2 = np.zeros(gmm.K)
-    M2 = np.zeros((gmm.K, gmm.D))
-    C2 = np.zeros((gmm.K, gmm.D, gmm.D))
-    P2 = np.zeros(gmm.K)
-    log_L2 = 0
-    log_S2_mean = 0
-    N_imp = len(data2)
+def _draw_select(mean, covar, N, sel_callback=None):
+    data = np.random.multivariate_normal(mean, covar, size=N)
+    if sel_callback is not None:
+        sel = sel_callback(data)
+        return data[sel]
+    return data
 
-    if len(data2):
-        # similar setup as above, but since imputated points
-        # are drawn from the model, we can avoid the caution of
-        # dealing with outliers: all points will be considered
-        S2 = np.zeros(len(data2))
-        neighborhood2 = [None for k in xrange(gmm.K)]
-        log_p2 = [[] for k in xrange(gmm.K)]
+def _computeMoments(k, gmm, sel_callback=None, tol=1e-2):
+    N = 1000
+    Nmax = 100000
+    d = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)
+    if len(d) == 0:
+        N *= 10
+        d = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)
+    # selection affects component
+    if len(d) < N * (1 - tol):
+        # check if we have enough samples for accurate mean within tol
+        while True:
+            M0 = len(d)
+            M1 = d.sum(axis=0) / M0
+            varM1 = ((d - M1)**2).sum(axis=0) / (M0-1)
+            if (varM1 / M0 < (M1 * tol)**2).all() or N >= Nmax:
+                break
+            # sample size to achieve tol
+            M0_ = int((varM1 / (M1*tol)**2).max())
+            # extra points (beyond M0) to achive, correct for selection loss
+            # make sure to at least double N (for the effort), but to stay within Nmax
+            extra = min(Nmax, max(N, int((M0_ - M0) / (M0 * 1./ N))))
+            d = np.concatenate((d, _draw_select(gmm.mean[k], gmm.covar[k], extra, sel_callback)))
+            N += extra
 
-        # run E now on data2
-        # then combine respective sums in M step
-        for k in xrange(gmm.K):
-            log_p2[k], neighborhood2[k], _ = _E(k, neighborhood2[k], gmm, data2, covar2, cutoff=cutoff)
-            S2[neighborhood2[k]] += np.exp(log_p2[k])
-
-        log_S2 = np.log(S2)
-        log_S2_mean = log_S2.mean()
-        log_L2 = log_S2.sum()
-
-        for k in xrange(gmm.K):
-            # with small imputation sets: neighborhood2[k] might be empty
-            if neighborhood2[k] is None or neighborhood2[k].size:
-                A2[k], M2[k], C2[k], P2[k] = _computeMSums(k, neighborhood2[k], log_p2[k], T2_inv, gmm, data2, log_S2)
-    return A2/over, M2/over, C2/over, P2/over, log_L2/over, log_S2_mean, N_imp/over
+        # covariance: sum_i (x_i - mu_k)^T(x_i - mu_k)
+        # Note: error on covariance larger than tol, but correction of means
+        # more important, so we'll ignore that
+        d_m = d - gmm.mean[k]
+        M2 = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / M0
+        M0 = M0 * 1./N
+    else:
+        M0 = 1
+        M1 = gmm.mean[k]
+        M2 = gmm.covar[k]
+    return M0, M1, M2

@@ -196,7 +196,7 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("cut", rng=rng)
+    cb, ps = getSelection("box", rng=rng)
 
     # add isotropic errors on data
     disp = 0.01
@@ -205,7 +205,6 @@ if __name__ == '__main__':
     sel = cb(noisy)
     data = iemgmm.createShared(noisy[sel])
     covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
-
 
     # plot data vs true model
     plotResults(orig, data, gmm, patch=ps)
@@ -232,7 +231,6 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
 
-    """
     # 2) IEMGMM without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -245,7 +243,7 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
-    """
+
     # 3) IEMGMM with imputation, igoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -260,7 +258,6 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
 
-    """
     # 4) IEMGMM with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -273,5 +270,4 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, patch=ps)
-    plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
-    """
+    #plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
