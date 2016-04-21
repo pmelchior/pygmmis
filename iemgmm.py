@@ -301,7 +301,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     A = np.empty(gmm.K)
     M = np.empty((gmm.K, gmm.D))
     C = np.empty((gmm.K, gmm.D, gmm.D))
-    P = np.empty(gmm.K)
 
     # moments of components under selection; need to be global for final update
     M0 = M1 = M2 = None
@@ -340,7 +339,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
         # perform sums for M step in the pool
         k = 0
-        for A[k], M[k], C[k], P[k] in \
+        for A[k], M[k], C[k] in \
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
             k += 1
 
@@ -371,7 +370,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
             pass
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A, M, C, P, N_, w, M0, M1, M2)
+        _M(gmm, A, M, C, N_, w, M0, M1, M2)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -463,7 +462,7 @@ def _logsum(l):
         c = overflow
     return np.log(np.exp(l + c).sum()) - c
 
-def _M(gmm, A, M, C, P, n_points, w=0., M0=None, M1=None, M2=None):
+def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
     # compute the new amplitude from the observed points only!
     # adjustment for missing points at the very end
     gmm.amp[:] = A / n_points
@@ -488,13 +487,10 @@ def _M(gmm, A, M, C, P, n_points, w=0., M0=None, M1=None, M2=None):
         gmm.covar[:,:,:] = C_ + gmm.covar[:,:,:] - M2[:,:,:]
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
-    # needed for imputation correction: P_k = sum_i p_ik
-    P_k = np.exp(_logsum(log_p_k))
-
     # form log_q_ik by dividing with S = sum_k p_ik
     # NOTE:  this modifies log_p_k in place!
     # NOTE2: reshape needed when neighborhood_k is None because of its
-    # mpliciti meaning as np.newaxis (which would create a 2D array)
+    # implicit meaning as np.newaxis (which would create a 2D array)
     log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
 
     # amplitude: A_k = sum_i q_ik
@@ -526,9 +522,11 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         b_k -= gmm.mean[k]
         B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
-    return A_k, M_k, C_k, P_k
+    return A_k, M_k, C_k
 
 def _draw_select(mean, covar, N, sel_callback=None):
+    # simple helper function to draw samples from a single component
+    # potentially with a selection function
     data = np.random.multivariate_normal(mean, covar, size=N)
     if sel_callback is not None:
         sel = sel_callback(data)
