@@ -266,7 +266,7 @@ def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.ran
     gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
 
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False, logfile=None):
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     if sel_callback is None:
@@ -308,9 +308,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         M0 = np.empty(gmm.K)
         M1 = np.empty((gmm.K, gmm.D))
         M2 = np.empty((gmm.K, gmm.D, gmm.D))
-
-    if logfile is not None:
-        logfile = open(logfile, 'w')
 
     # begin EM
     it = 0
@@ -365,9 +362,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                     print ("\t%.2f" * gmm.K) % tuple(M0)
                 else:
                     print (M0 < 1).sum()
-
-        if logfile is not None:
-            pass
 
         # perform M step with M-sums of data and imputations runs
         _M(gmm, A, M, C, N_, w, M0, M1, M2)
