@@ -346,7 +346,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # need to do MC integral of p(missing | k):
         # get missing data by imputation from the current model
         if sel_callback is not None:
-
             # with imputation the observed data logL can decrease.
             # revert to previous model if that is the case
             if it > 0 and log_L_ < log_L:
@@ -371,7 +370,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
-            if gmm.verbose:
+            if gmm.verbose >= 2:
                 print "mean likelihood converged within tolerance %r: stopping here." % tol
             break
 
@@ -387,8 +386,9 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         for c in changed:
             neighborhood[c] = None
             V[c] = V_[c]
-            if gmm.verbose >= 2:
-                print " resetting neighborhood[%d] due to volume change" % c
+        if gmm.verbose >= 2 and changed.any():
+            print "resetting neighborhoods due to volume change: ",
+            print ("(" + "%d," * len(changed) + ")") % tuple(changed)
         S[:] = 0
         N[:] = 0
         it += 1
