@@ -478,10 +478,11 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
         gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C_
     else:
-        good = M0 > 0.1
+        good = M0 > 0.2
+        good &= np.linalg.det(C_ + gmm.covar - M2) > 0
         if good.all():
-            gmm.mean[:,:] = M / A[:,None] + gmm.mean[:,:] - M1[:,:]
-            gmm.covar[:,:,:] = C_ + gmm.covar[:,:,:] - M2[:,:,:]
+            gmm.mean[:,:] = M / A[:,None] + gmm.mean - M1
+            gmm.covar[:,:,:] = C_ + gmm.covar - M2
         else:
             gmm.mean[good,:] = M[good,:] / A[good,None] + gmm.mean[good,:] - M1[good,:]
             gmm.covar[good,:,:] = C_[good,:,:] + gmm.covar[good,:,:] - M2[good,:,:]
