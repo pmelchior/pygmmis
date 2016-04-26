@@ -519,45 +519,60 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return A_k, M_k, C_k
 
-def _draw_select(mean, covar, N, sel_callback=None):
+def _draw_select(mean, covar, N, sel_callback=None, invert_callback=False, return_sel=False):
     # simple helper function to draw samples from a single component
     # potentially with a selection function
     data = np.random.multivariate_normal(mean, covar, size=N)
     if sel_callback is not None:
         sel = sel_callback(data)
+        if invert_callback:
+            sel = np.invert(sel)
+        if return_sel:
+            return data, sel
         return data[sel]
     return data
 
-def _computeMoments(k, gmm, sel_callback=None, tol=1e-2):
-    N = 1000
-    Nmax = 100000
-    d = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)
-    while len(d) <= 100:
-        N *= 10
-        d = np.concatenate((d, _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback)))
-    # selection affects component
-    if len(d) < N * (1 - tol):
-        # check if we have enough samples for accurate mean within tol
-        while True:
-            M0 = len(d)
-            M1 = d.sum(axis=0) / M0
-            varM1 = ((d - M1)**2).sum(axis=0) / (M0-1)
-            if (varM1 / M0 < (M1 * tol)**2).all() or N >= Nmax:
-                break
-            # sample size to achieve tol
-            M0_ = int((varM1 / (M1*tol)**2).max())
-            # extra points (beyond M0) to achive, correct for selection loss
-            # make sure to at least double N (for the effort), but to stay within Nmax
-            extra = min(Nmax, max(N, int((M0_ - M0) / (M0 * 1./ N))))
-            d = np.concatenate((d, _draw_select(gmm.mean[k], gmm.covar[k], extra, sel_callback)))
-            N += extra
+def _sampleMoments(k, gmm, d, tol, N, Nmax, sel_callback=None, invert_callback=False):
+    while True:
+        M0 = len(d)
+        M1 = d.sum(axis=0) / M0
+        varM1 = ((d - M1)**2).sum(axis=0) / (M0-1)
+        if (varM1 / M0 < (M1 * tol)**2).all() or N >= Nmax:
+            break
+        # sample size to achieve tol
+        M0_ = int((varM1 / (M1*tol)**2).max())
+        # extra points (beyond M0) to achive, correct for selection loss
+        # make sure to at least double N (for the effort), but to stay within Nmax
+        extra = min(Nmax, max(N, int((M0_ - M0) / (M0 * 1./ N))))
+        d = np.concatenate((d, _draw_select(gmm.mean[k], gmm.covar[k], extra, sel_callback, invert_callback)))
+        N += extra
 
-        # covariance: sum_i (x_i - mu_k)^T(x_i - mu_k)
-        # Note: error on covariance larger than tol, but correction of means
-        # more important, so we'll ignore that
-        d_m = d - gmm.mean[k]
-        M2 = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / M0
-        M0 = M0 * 1./N
+    # covariance: sum_i (x_i - mu_k)^T(x_i - mu_k)
+    # Note: error on covariance larger than tol, but correction of means
+    # more important, so we'll ignore that
+    d_m = d - gmm.mean[k]
+    M2 = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / M0
+    M0 = M0 * 1./N
+    return N, M0, M1, M2
+
+def _computeMoments(k, gmm, sel_callback=None, tol=1e-2):
+    N = int(10/tol)
+    Nmax = 100000
+    d, sel = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback=sel_callback, return_sel=True)
+    N_ = sel.sum()
+    # selection affects component
+    if N_ < N * (1 - tol):
+
+        # component most inside: use inside draws
+        if N_ > N / 2:
+            N, M0, M1, M2 = _sampleMoments(k, gmm, d[sel], tol, N, Nmax, sel_callback=sel_callback)
+
+        # predict inside moments from outside draws
+        else:
+            N, M0_, M1_, M2_ = _sampleMoments(k, gmm, d[~sel], tol, N, Nmax, sel_callback=sel_callback, invert_callback=True)
+            M0 = 1 - M0_
+            M1 = (N*gmm.mean[k] - M1_* M0_ * N) / M0 / N
+            M2 = (N*gmm.covar[k] - M2_* M0_ * N) / M0 / N
     else:
         M0 = 1
         M1 = gmm.mean[k]
