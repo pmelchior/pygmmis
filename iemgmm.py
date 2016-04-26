@@ -578,7 +578,7 @@ def _computeMoments(k, gmm, sel_callback=None, tol=1e-2):
         # predict inside moments from outside draws
         else:
             N, M0_, M1_, M2_ = _sampleMoments(k, gmm, d[~sel], tol, N, Nmax, sel_callback=sel_callback, invert_callback=True)
-            M0 = 1 - M0_
+            M0 = max(tol, 1 - M0_) # prevent division by zero
             M1 = (N*gmm.mean[k] - M1_* M0_ * N) / M0 / N
             M2 = (N*gmm.covar[k] - M2_* M0_ * N) / M0 / N
     else:
