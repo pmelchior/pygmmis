@@ -478,8 +478,16 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
         gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C_
     else:
-        gmm.mean[:,:] = M / A[:,None] + gmm.mean[:,:] - M1[:,:]
-        gmm.covar[:,:,:] = C_ + gmm.covar[:,:,:] - M2[:,:,:]
+        good = M0 > 0.1
+        if good.all():
+            gmm.mean[:,:] = M / A[:,None] + gmm.mean[:,:] - M1[:,:]
+            gmm.covar[:,:,:] = C_ + gmm.covar[:,:,:] - M2[:,:,:]
+        else:
+            gmm.mean[good,:] = M[good,:] / A[good,None] + gmm.mean[good,:] - M1[good,:]
+            gmm.covar[good,:,:] = C_[good,:,:] + gmm.covar[good,:,:] - M2[good,:,:]
+            # freeze components when the move off too much
+            gmm.mean[~good,:] = gmm.mean[~good,:]
+            gmm.covar[~good,:,:] = gmm.covar[~good,:,:]
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # form log_q_ik by dividing with S = sum_k p_ik
