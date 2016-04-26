@@ -478,8 +478,21 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
         gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C_
     else:
-        good = M0 > 0.2
-        good &= np.linalg.det(C_ + gmm.covar - M2) > 0
+        # only update components for which the selection corrections are
+        # reasonably well determined.
+        good = M0 > 0.1
+        # also check of covariance remains positive definite:
+        # instead of eigenvalues, use cholesky:
+        # http://stackoverflow.com/questions/16266720/
+        try:
+            np.linalg.cholesky(C_ + gmm.covar - M2)
+        except np.linalg.LinAlgError:
+            for k in xrange(gmm.K):
+                try:
+                    np.linalg.cholesky(C_[k] + gmm.covar[k] - M2[k])
+                except np.linalg.LinAlgError:
+                    good[k] = 0
+
         if good.all():
             gmm.mean[:,:] = M / A[:,None] + gmm.mean - M1
             gmm.covar[:,:,:] = C_ + gmm.covar - M2
