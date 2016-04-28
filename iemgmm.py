@@ -241,7 +241,6 @@ def initializeFromDataMinMax(gmm, k=None, data=None, covar=None, s=None, rng=np.
     if k is None:
         k = slice(None)
     gmm.amp[k] = 1./gmm.K
-    gmm.amp /= gmm.amp.sum()
     # set model to random positions with equally sized spheres within
     # volumne spanned by data
     min_pos = data.min(axis=0)
@@ -268,7 +267,6 @@ def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=n
         except TypeError:
             k_len = 1
     gmm.amp[k] = 1./gmm.K
-    gmm.amp /= gmm.amp.sum()
     # initialize components around data points with uncertainty s
     refs = rng.randint(0, len(data), size=k_len)
     if s is None:
@@ -376,10 +374,10 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 k += 1
 
             if gmm.verbose:
-                if verbose >= 2:
-                    print ("\t%.2f" * gmm.K) % tuple(M0)
-                else:
-                    print (M0 < 1).sum()
+                print (M0 < 1).sum()
+                if verbose >= 3:
+                    print "component inside fractions: ",
+                    print "("%.2f," * gmm.K) % tuple(M0)
 
         # perform M step with M-sums of data and imputations runs
         _M(gmm, A, M, C, N_, w, M0, M1, M2)
@@ -444,7 +442,9 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None
             if gmm.verbose >= 2:
                 print "re-initializing component %d with empty neighborhood" % k
             if init_callback is not None:
+                amp_ = gmm.amp[k]
                 init_callback(gmm, k=k, data=data, covar=covar)
+                gmm.amp[k] = amp_
             neighborhood_k = None
             return _E(k, neighborhood_k, gmm, data, covar=covar, cutoff=cutoff, init_callback=init_callback)
 
