@@ -311,7 +311,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
 
-    # save volumes to see which components change
+    # compute volumes as proxy for component change
     V = np.linalg.det(gmm.covar)
 
     # save the M sums from observed data
@@ -380,7 +380,8 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                     print ("%.2f," * gmm.K) % tuple(M0)
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, A, M, C, N_, w, M0, M1, M2)
+        # calculates updated volume on the fly
+        V_ = _M(gmm, A, M, C, N_, w, M0, M1, M2)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -395,7 +396,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
         # check new component volumes and reset sel when it grows by
         # more then 25%
-        V_ = np.linalg.det(gmm.covar)
         changed = np.flatnonzero((V_- V)/V > 0.25)
         for c in changed:
             neighborhood[c] = None
@@ -482,6 +482,7 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
     if M0 is None:
         gmm.mean[:,:] = M / A[:,None]
         gmm.covar[:,:,:] = C_
+        V = np.linalg.det(gmm.covar)
     else:
         # only update components for which the selection corrections are
         # reasonably well determined.
@@ -490,13 +491,17 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
         # instead of eigenvalues, use cholesky:
         # http://stackoverflow.com/questions/16266720/
         try:
-            np.linalg.cholesky(C_ + gmm.covar - M2)
+            L = np.linalg.cholesky(C_ + gmm.covar - M2)
+            V = np.prod(np.diagonal(L, axis1=1, axis2=2), axis=1)**2
         except np.linalg.LinAlgError:
+            V = np.empty(gmm.K)
             for k in xrange(gmm.K):
                 try:
-                    np.linalg.cholesky(C_[k] + gmm.covar[k] - M2[k])
+                    L = np.linalg.cholesky(C_[k] + gmm.covar[k] - M2[k])
+                    V[k] = np.prod(np.diag(L))**2
                 except np.linalg.LinAlgError:
                     good[k] = 0
+                    V[k] = np.linalg.det(gmm.covar[k])
 
         if good.all():
             gmm.mean[:,:] = M / A[:,None] + gmm.mean - M1
@@ -507,6 +512,7 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
             # freeze components when the move off too much
             gmm.mean[~good,:] = gmm.mean[~good,:]
             gmm.covar[~good,:,:] = gmm.covar[~good,:,:]
+    return V
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # form log_q_ik by dividing with S = sum_k p_ik
