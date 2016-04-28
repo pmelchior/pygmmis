@@ -275,7 +275,7 @@ def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=n
     gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False):
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataAtRandom, tol=1e-3, verbose=False):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     if sel_callback is None:
@@ -331,7 +331,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
         for log_p[k], neighborhood[k], T_inv[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, init_callback, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
             k += 1
@@ -410,7 +410,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     pool.close()
     return gmm
 
-def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
+def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
     if cutoff is None or neighborhood_k is None:
@@ -432,8 +432,10 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     if cutoff is not None:
         indices = chi2 < cutoff*cutoff*gmm.D
 
-        # the component has no points associated with it: reset neighborhood
+        # the component has no points associated with it: re-initialize it
         if not indices.any():
+            if init_callback is not None:
+                init_callback(gmm, k=k, data=data, covar=covar)
             neighborhood_k = None
             return _E(k, neighborhood_k, gmm, data, covar=covar, cutoff=cutoff)
 
