@@ -241,6 +241,7 @@ def initializeFromDataMinMax(gmm, k=None, data=None, covar=None, s=None, rng=np.
     if k is None:
         k = slice(None)
     gmm.amp[k] = 1./gmm.K
+    gmm.amp /= gmm.amp.sum()
     # set model to random positions with equally sized spheres within
     # volumne spanned by data
     min_pos = data.min(axis=0)
@@ -260,8 +261,14 @@ def initializeFromDataMinMax(gmm, k=None, data=None, covar=None, s=None, rng=np.
 def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=np.random):
     if k is None:
         k = slice(None)
-    k_len = len(gmm.amp[k])
+        k_len = gmm.K
+    else:
+        try:
+            k_len = len(gmm.amp[k])
+        except TypeError:
+            k_len = 1
     gmm.amp[k] = 1./gmm.K
+    gmm.amp /= gmm.amp.sum()
     # initialize components around data points with uncertainty s
     refs = rng.randint(0, len(data), size=k_len)
     if s is None:
@@ -324,7 +331,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     # begin EM
     it = 0
     maxiter = max(100, gmm.K)
-    while it < maxiter: # limit loop in case of no convergence
+    while it < maxiter: # limit loop in case of slow convergence
 
         # compute p(i | k) for each k independently in the pool
         # need S = sum_k p(i | k) for further calculation
@@ -434,10 +441,12 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None
 
         # the component has no points associated with it: re-initialize it
         if not indices.any():
+            if gmm.verbose >= 2:
+                print "re-initializing component %d with empty neighborhood" % k
             if init_callback is not None:
                 init_callback(gmm, k=k, data=data, covar=covar)
             neighborhood_k = None
-            return _E(k, neighborhood_k, gmm, data, covar=covar, cutoff=cutoff)
+            return _E(k, neighborhood_k, gmm, data, covar=covar, cutoff=cutoff, init_callback=init_callback)
 
         chi2 = chi2[indices]
         if covar is not None:
