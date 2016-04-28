@@ -237,13 +237,15 @@ class GMM(object):
 # Begin of fit functions
 ############################
 
-def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.random):
-    gmm.amp[:] = np.ones(K)/K # now gmm.K works
+def initializeFromDataMinMax(gmm, k=None, data=None, covar=None, s=None, rng=np.random):
+    if k is None:
+        k = slice(None)
+    gmm.amp[k] = 1./gmm.K
     # set model to random positions with equally sized spheres within
     # volumne spanned by data
     min_pos = data.min(axis=0)
     max_pos = data.max(axis=0)
-    gmm.mean[:,:] = min_pos + (max_pos-min_pos)*rng.rand(gmm.K, gmm.D)
+    gmm.mean[k,:] = min_pos + (max_pos-min_pos)*rng.rand(gmm.K, gmm.D)
     # if s is not set: use volume filling argument:
     # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
     # should completely fill the volume spanned by data.
@@ -253,12 +255,15 @@ def initializeFromDataMinMax(gmm, K, data=None, covar=None, s=None, rng=np.rando
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
         if gmm.verbose >= 2:
             print "initializing spheres with s=%.2f in data domain" % s
-    gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
+    gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.random):
-    gmm.amp[:] = np.ones(K)/K
+def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=np.random):
+    if k is None:
+        k = slice(None)
+    k_len = len(gmm.amp[k])
+    gmm.amp[k] = 1./gmm.K
     # initialize components around data points with uncertainty s
-    refs = rng.randint(0, len(data), size=K)
+    refs = rng.randint(0, len(data), size=k_len)
     if s is None:
         from scipy.special import gamma
         min_pos = data.min(axis=0)
@@ -267,16 +272,15 @@ def initializeFromDataAtRandom(gmm, K, data=None, covar=None, s=None, rng=np.ran
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
         if gmm.verbose >= 2:
             print "initializing spheres with s=%.2f near data points" % s
-    gmm.mean[:,:] = data[refs] + rng.normal(0, s, size=(gmm.K,data.shape[1]))
-    gmm.covar[:,:,:] = np.tile(s**2 * np.eye(data.shape[1]), (gmm.K,1,1))
-
+    gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
+    gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataMinMax, tol=1e-3, verbose=False):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     if sel_callback is None:
         # init components
-        init_callback(gmm, K, data, covar)
+        init_callback(gmm, data=data, covar=covar)
     else:
         if covar is None:
             # run default EM first

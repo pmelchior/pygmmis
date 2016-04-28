@@ -277,7 +277,7 @@ if __name__ == '__main__':
 
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
-    init_cb = partial(iemgmm.initializeFromDataMinMax, rng=rng)
+    init_cb = partial(iemgmm.initializeFromDataAtRandom, rng=rng)
 
     # repeated runs: store results and logL
     K = 3
