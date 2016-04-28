@@ -91,56 +91,6 @@ class GMM(object):
         """
         np.savez(filename, amp=self.amp, mean=self.mean, covar=self.covar, **kwargs)
 
-    def setRelevantComponents(self, relevant=None):
-        # restore from backup copy if it exits
-        try:
-            self.amp = self._amp_cp
-            self.mean = self._mean_cp
-            self.covar = self._covar_cp
-        except AttributeError:
-            pass
-        if relevant is not None:
-            # copy all coeffs to backup and only show relevant ones to the outside
-            self._amp_cp = self.amp.copy()
-            self._mean_cp = self.mean.copy()
-            self._covar_cp = self.covar.copy()
-
-            self.amp = self.amp[relevant]
-            self.amp /= self.amp.sum()
-            self.mean = self.mean[relevant]
-            self.covar = self.covar[relevant]
-
-    def findRelevantComponents(self, coords, covar=None, method="chi2", cutoff=3):
-        if method.upper() == "CHI2":
-            # uses all components that have at least one point in data within
-            # chi2 cutoff.
-            import multiprocessing
-            import parmap
-            chunksize = int(np.ceil(self.K*1./multiprocessing.cpu_count()))
-            k = 0
-            relevant = set()
-            for has_relevant_points in parmap.map(self._pointsAboveChi2Cutoff, xrange(self.K), coords, covar, cutoff, chunksize=chunksize):
-                if has_relevant_points:
-                    relevant.add(k)
-                k += 1
-            return list(relevant)
-
-        if method.upper() == "RADIUS":
-            # search coords for neighbors around each compoenent within
-            # cutoff radius
-            from sklearn.neighbors import KDTree
-            tree = KDTree(coords)
-            relevant_points = tree.query_radius(self.mean, r=cutoff, count_only=True)
-            return np.nonzero(relevant_points > 0)[0]
-
-        raise NotImplementedError("GMM.findRelevantComponents: method '%s' not implemented!" % method)
-
-
-    def _pointsAboveChi2Cutoff(self, k, coords, covar=None, cutoff=3):
-        # helper function to reduce memory requirement of findRelevantComponents():
-        # avoids return of entire chi2 vector per component
-        return (self.logL_k(k, coords, covar=covar, chi2_only=True) < cutoff*cutoff*self.D).sum()
-
     def draw(self, size=1, sel_callback=None, invert_callback=False, rng=np.random):
         # draw indices for components given amplitudes
         ind = rng.choice(self.K, size=size, p=self.amp)

@@ -240,7 +240,7 @@ if __name__ == '__main__':
     seed = None
     from numpy.random import RandomState
     rng = RandomState(seed)
-    verbose = False
+    verbose = 2
 
     # draw N points from 3-component GMM
     N = 400
@@ -273,7 +273,7 @@ if __name__ == '__main__':
     covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
 
     # plot data vs true model
-    plotResults(orig, data, gmm, np.ones(1), patch=ps)
+    #plotResults(orig, data, gmm, np.ones(1), patch=ps)
 
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
@@ -281,10 +281,11 @@ if __name__ == '__main__':
 
     # repeated runs: store results and logL
     K = 3
-    R = 10
+    R = 1
     imp = iemgmm.GMM(K=K*R, D=D)
     l = np.empty(R)
 
+    """
     # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -297,7 +298,7 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
-
+    """
     """
     # 2) IEMGMM without imputation, incorporating errors
     start = datetime.datetime.now()
@@ -312,7 +313,7 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
     """
-
+    """
     # 3) IEMGMM with imputation, igoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -325,7 +326,7 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
-
+    """
     # 4) IEMGMM with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -338,5 +339,5 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
-    plotDifferences(orig, data, imp, R, l, patch=ps)
+    #plotDifferences(orig, data, imp, R, l, patch=ps)
     #plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
