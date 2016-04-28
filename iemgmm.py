@@ -176,6 +176,26 @@ class GMM(object):
         else:
             return np.exp(self.logL(coords, covar=covar, relevant=relevant))
 
+    def _mp_chunksize(self):
+        import multiprocessing
+        cpu_count = multiprocessing.cpu_count()
+        chunksize = max(1, self.K/cpu_count)
+        n_chunks = min(cpu_count, self.K/chunksize)
+        return n_chunks, chunksize
+
+    def _get_chunks(self):
+        n_chunks, chunksize = self._mp_chunksize()
+        left = self.K - n_chunks*chunksize
+        chunks = []
+        n = 0
+        for i in xrange(n_chunks):
+            n_ = n + chunksize
+            if left > i:
+                n_ += 1
+            chunks.append((n, n_))
+            n = n_
+        return chunks
+
     def logL(self, coords, covar=None, relevant=None):
         """Log-likelihood of data given all (i.e. the sum of) GMM components
 
@@ -198,9 +218,7 @@ class GMM(object):
         # compute it in stages: first for each chunk, then sum over all chunks
         import multiprocessing
         pool = multiprocessing.Pool()
-        cpu_count = multiprocessing.cpu_count()
-        chunksize = int(np.ceil(self.K*1./cpu_count))
-        chunks = [(i*chunksize, min(self.K, (i+1)*chunksize)) for i in xrange(min(self.K, cpu_count))]
+        chunks = self._get_chunks()
         results = [pool.apply_async(self._logsum_chunk, (chunk, coords, covar)) for chunk in chunks]
         log_p_y_chunk = []
         for r in results:
@@ -299,7 +317,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     import multiprocessing
     import parmap
     pool = multiprocessing.Pool()
-    chunksize = int(np.ceil(gmm.K*1./multiprocessing.cpu_count()))
+    n_chunks, chunksize = gmm._mp_chunksize()
 
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
