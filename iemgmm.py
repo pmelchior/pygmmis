@@ -36,6 +36,32 @@ import copy_reg
 import types
 copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
+def logsum(logX, axis=0):
+    """Computes log of the sum along give axis from the log of the summands.
+
+    This method tries hard to avoid over- or underflow.
+    See appendix A of Bovy, Hogg, Roweis (2009).
+
+    Args:
+        logX: array of logarithmic summands
+        axis: axis to sum over
+
+    Returns:
+        log of the sum, shortened by one axis
+
+    Throws:
+        ValueError if logX has length 0 along given axis
+
+    """
+    floatinfo = np.finfo(logX.dtype)
+    underflow = np.log(floatinfo.tiny) - logX.min(axis=axis)
+    overflow = np.log(floatinfo.max) - logX.max(axis=axis) - np.log(logX.shape[axis])
+    c = np.where(underflow < overflow, underflow, overflow)
+    # adjust the shape of c for addition with logX
+    c_shape = [slice(None) for i in xrange(len(logX.shape))]
+    c_shape[axis] = None
+    return np.log(np.exp(logX + c[c_shape]).sum(axis=axis)) - c
+
 class GMM(object):
     def __init__(self, K=1, D=1, verbose=False):
         self.verbose = verbose
@@ -180,7 +206,7 @@ class GMM(object):
         for r in results:
             log_p_y_chunk.append(r.get())
         pool.close()
-        return self.logsumLogX(np.array(log_p_y_chunk)) # sum over all chunks = all k
+        return logsum(np.array(log_p_y_chunk)) # sum over all chunks = all k
 
     def _logsum_chunk(self, chunk, coords, covar=None):
         # helper function to reduce the memory requirement of logL
@@ -188,7 +214,7 @@ class GMM(object):
         for i in xrange(chunk[1] - chunk[0]):
             k = chunk[0] + i
             log_p_y_k[i,:] = self.logL_k(k, coords, covar=covar)
-        return self.logsumLogX(log_p_y_k)
+        return logsum(log_p_y_k)
 
     def logL_k(self, k, coords, covar=None, chi2_only=False):
         # compute p(x | k)
@@ -206,27 +232,6 @@ class GMM(object):
         (sign, logdet) = np.linalg.slogdet(T_k)
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
-
-    @staticmethod
-    def logsumLogX(logX):
-        """Computes log of the sum given the log of the summands.
-
-        This method tries hard to avoid over- or underflow.
-        See appendix A of Bovy, Hogg, Roweis (2009).
-
-        Args:
-        logX: (K, N) log-likelihoods from K calls to logL_K() with N coordinates
-
-        Returns:
-        (N, 1) of log of total likelihood
-
-        """
-        floatinfo = np.finfo(logX.dtype)
-        underflow = np.log(floatinfo.tiny) - logX.min(axis=0)
-        overflow = np.log(floatinfo.max) - logX.max(axis=0) - np.log(logX.shape[0])
-        c = np.where(underflow < overflow, underflow, overflow)
-        return np.log(np.exp(logX + c).sum(axis=0)) - c
-
 
 ############################
 # Begin of fit functions
@@ -418,7 +423,7 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
         T_inv_k = np.linalg.inv(gmm.covar[k] + covar[neighborhood_k].reshape(len(dx), gmm.D, gmm.D))
         chi2 = np.einsum('...i,...ij,...j', dx, T_inv_k, dx)
 
-    # NOTE: close to convergence, we can stop applying the cutoff because
+    # NOTE: close to convergence, we could stop applying the cutoff because
     # changes to neighborhood will be minimal
     if cutoff is not None:
         indices = np.flatnonzero(chi2 < cutoff*cutoff*gmm.D)
@@ -435,27 +440,6 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
-
-def _logsum(l):
-    """Computes log of a sum, given the log of the elements.
-
-    This method tries hard to avoid over- or underflow that may arise
-    when computing exp(ll).
-
-    See appendix A of Bovy, Hogg, Roweis (2009).
-
-    Args:
-        l:  (N,1) log of whatever
-
-    """
-    floatinfo = np.finfo(l.dtype)
-    underflow = np.log(floatinfo.tiny) - l.min()
-    overflow = np.log(floatinfo.max) - l.max() - np.log(l.size)
-    if underflow < overflow:
-        c = underflow
-    else:
-        c = overflow
-    return np.log(np.exp(l + c).sum()) - c
 
 def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
     # compute the new amplitude from the observed points only!
@@ -511,7 +495,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
 
     # amplitude: A_k = sum_i q_ik
-    A_k = np.exp(_logsum(log_p_k))
+    A_k = np.exp(logsum(log_p_k))
 
     # in fact: q_ik, but we treat sample index i silently everywhere
     qk = np.exp(log_p_k)

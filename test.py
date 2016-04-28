@@ -8,7 +8,7 @@ import matplotlib.lines as lines
 import datetime
 from functools import partial
 
-def plotResults(orig, data, gmm, ll, patch=None):
+def plotResults(orig, data, gmm, l, patch=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
@@ -22,9 +22,8 @@ def plotResults(orig, data, gmm, ll, patch=None):
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
     # weight with logL of each run
-    w = np.exp(ll)
     gmm_ = gmm
-    gmm_.amp = (np.split(gmm_.amp, w.size) * w[:,None]).flatten()
+    gmm_.amp = (np.split(gmm_.amp, l.size) * l[:,None]).flatten()
     gmm_.amp /= gmm_.amp.sum()
 
     # compute sum_k(p_k(x)) for all x
@@ -55,7 +54,7 @@ def plotResults(orig, data, gmm, ll, patch=None):
     plt.tight_layout()
     plt.show()
 
-def plotDifferences(orig, data, gmm, R, patch=None):
+def plotDifferences(orig, data, gmm, R, l, patch=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
@@ -70,8 +69,7 @@ def plotDifferences(orig, data, gmm, R, patch=None):
 
     # weight with logL of each run
     gmm_ = gmm
-    w = np.exp(ll)
-    gmm_.amp = (np.split(gmm_.amp, w.size) * w[:,None]).flatten()
+    gmm_.amp = (np.split(gmm_.amp, l.size) * l[:,None]).flatten()
     gmm_.amp /= gmm_.amp.sum()
 
     # compute sum_k(p_k(x)) for all x
@@ -91,9 +89,9 @@ def plotDifferences(orig, data, gmm, R, patch=None):
         # compute sum_k(p_k(x)) for all x
         p[r,:,:] = gmm_(coords).reshape((B,B))
 
-    p = ((p-pw[None,:,:])**2 * w[:,None, None]).sum(axis=0)
-    V1 = w.sum()
-    V2 = (w**2).sum()
+    p = ((p-pw[None,:,:])**2 * l[:,None, None]).sum(axis=0)
+    V1 = l.sum()
+    V2 = (l**2).sum()
     p /= (V1 - V2/V1)
 
     p = np.arcsinh(np.sqrt(p)/1e-4)
@@ -264,10 +262,10 @@ if __name__ == '__main__':
 
 
     # get observational selection function
-    cb, ps = getSelection("cut", rng=rng)
+    cb, ps = getSelection("boxWithHole", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.4
+    disp = 0.8
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy)
@@ -275,7 +273,7 @@ if __name__ == '__main__':
     covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
 
     # plot data vs true model
-    plotResults(orig, data, gmm, [1], patch=ps)
+    plotResults(orig, data, gmm, np.ones(1), patch=ps)
 
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
@@ -285,20 +283,20 @@ if __name__ == '__main__':
     K = 3
     R = 10
     imp = iemgmm.GMM(K=K*R, D=D)
-    ll = np.empty(R)
+    l = np.empty(R)
 
     # 1) IEMGMM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
         imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
-        ll[r] = imp_.logL(data).mean()
+        l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, ll, patch=ps)
+    plotResults(orig, data, imp, l, patch=ps)
 
     """
     # 2) IEMGMM without imputation, incorporating errors
@@ -306,13 +304,13 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     for r in xrange(R):
         imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
-        ll[r] = imp_.logL(data).mean()
+        l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, ll, patch=ps)
+    plotResults(orig, data, imp, l, patch=ps)
     """
 
     # 3) IEMGMM with imputation, igoring errors
@@ -320,25 +318,25 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     for r in xrange(R):
         imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
-        ll[r] = imp_.logL(data).mean()
+        l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, ll, patch=ps)
+    plotResults(orig, data, imp, l, patch=ps)
 
     # 4) IEMGMM with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
         imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
-        ll[r] = imp_.logL(data).mean()
+        l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
         imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, ll, patch=ps)
-    plotDifferences(orig, data, imp, R, patch=ps)
+    plotResults(orig, data, imp, l, patch=ps)
+    plotDifferences(orig, data, imp, R, l, patch=ps)
     #plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
