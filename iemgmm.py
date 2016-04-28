@@ -426,12 +426,18 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     # NOTE: close to convergence, we could stop applying the cutoff because
     # changes to neighborhood will be minimal
     if cutoff is not None:
-        indices = np.flatnonzero(chi2 < cutoff*cutoff*gmm.D)
+        indices = chi2 < cutoff*cutoff*gmm.D
+
+        # the component has no points associated with it: reset neighborhood
+        if not indices.any():
+            neighborhood_k = None
+            return _E(k, neighborhood_k, gmm, data, covar=covar, cutoff=cutoff)
+
         chi2 = chi2[indices]
         if covar is not None:
             T_inv_k = T_inv_k[indices]
         if neighborhood_k is None:
-            neighborhood_k = indices
+            neighborhood_k = np.flatnonzero(indices)
         else:
             neighborhood_k = neighborhood_k[indices]
 
