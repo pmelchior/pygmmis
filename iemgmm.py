@@ -377,7 +377,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 print (M0 < 1).sum()
                 if verbose >= 3:
                     print "component inside fractions: ",
-                    print "("%.2f," * gmm.K) % tuple(M0)
+                    print ("%.2f," * gmm.K) % tuple(M0)
 
         # perform M step with M-sums of data and imputations runs
         _M(gmm, A, M, C, N_, w, M0, M1, M2)
