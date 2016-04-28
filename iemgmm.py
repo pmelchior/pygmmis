@@ -335,7 +335,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
-        for log_p[k], neighborhood[k], T_inv[k] in \
+        for gmm.amp[k], gmm.mean[k], gmm.covar[k], log_p[k], neighborhood[k], T_inv[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, init_callback, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
@@ -460,7 +460,7 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
+    return gmm.amp[k], gmm.mean[k], gmm.covar[k], np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
 
 def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
     # compute the new amplitude from the observed points only!
