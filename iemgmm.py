@@ -92,8 +92,8 @@ class GMM(object):
         np.savez(filename, amp=self.amp, mean=self.mean, covar=self.covar, **kwargs)
 
     def draw(self, size=1, sel_callback=None, invert_callback=False, rng=np.random):
-        # draw indices for components given amplitudes
-        ind = rng.choice(self.K, size=size, p=self.amp)
+        # draw indices for components given amplitudes, need to make sure: sum=1
+        ind = rng.choice(self.K, size=size, p=(self.amp/self.amp.sum()))
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
@@ -454,7 +454,8 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
     else:
         # only update components for which the selection corrections are
         # reasonably well determined.
-        good = M0 > 0.1
+        M0_limit = 0.1
+        good = M0 > M0_limit
         # also check of covariance remains positive definite:
         # instead of eigenvalues, use cholesky:
         # http://stackoverflow.com/questions/16266720/
@@ -480,6 +481,8 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
             # freeze components when the move off too much
             gmm.mean[~good,:] = gmm.mean[~good,:]
             gmm.covar[~good,:,:] = gmm.covar[~good,:,:]
+            # restrict M0 to limit
+            M0[~good] = M0_limit
     return V
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
