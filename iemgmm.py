@@ -338,7 +338,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
             k = 0
             for M0[k], M1[k], M2[k] in \
-            parmap.map(_computeMoments, xrange(gmm.K), gmm, sel_callback, pool=pool, chunksize=chunksize):
+            parmap.starmap(_computeMoments, zip(gmm.mean, gmm.covar, T_inv), sel_callback, pool=pool, chunksize=chunksize):
                 k += 1
 
             if gmm.verbose:
@@ -536,7 +536,7 @@ def _draw_select(mean, covar, N, sel_callback=None, invert_callback=False, retur
         return data[sel]
     return data
 
-def _sampleMoments(k, gmm, d, tol, N, Nmax, sel_callback=None, invert_callback=False):
+def _sampleMoments(mean, covar, d, tol, N, Nmax, sel_callback=None, invert_callback=False):
     while True:
         M0 = len(d)
         M1 = d.sum(axis=0) / M0
@@ -548,37 +548,45 @@ def _sampleMoments(k, gmm, d, tol, N, Nmax, sel_callback=None, invert_callback=F
         # extra points (beyond M0) to achive, correct for selection loss
         # make sure to at least double N (for the effort), but to stay within Nmax
         extra = min(Nmax, max(N, int((M0_ - M0) / (M0 * 1./ N))))
-        d = np.concatenate((d, _draw_select(gmm.mean[k], gmm.covar[k], extra, sel_callback, invert_callback)))
+        d = np.concatenate((d, _draw_select(mean, covar, extra, sel_callback, invert_callback)))
         N += extra
 
     # covariance: sum_i (x_i - mu_k)^T(x_i - mu_k)
     # Note: error on covariance larger than tol, but correction of means
     # more important, so we'll ignore that
-    d_m = d - gmm.mean[k]
+    d_m = d - mean
     M2 = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / M0
     M0 = M0 * 1./N
     return N, M0, M1, M2
 
-def _computeMoments(k, gmm, sel_callback=None, tol=1e-2):
+def _computeMoments(mean_k, covar_k, T_inv_k, sel_callback=None, tol=1e-2):
     N = int(10/tol)
     Nmax = 100000
-    d, sel = _draw_select(gmm.mean[k], gmm.covar[k], N, sel_callback=sel_callback, return_sel=True)
+
+    """
+    if T_inv_k is not None:
+        noise = np.linalg.inv(T_inv_k).mean(axis=0) - covar_k
+        covar_k += noise"""
+
+    d, sel = _draw_select(mean_k, covar_k, N, sel_callback=sel_callback, return_sel=True)
     N_ = sel.sum()
     # selection affects component
     if N_ < N * (1 - tol):
 
         # component most inside: use inside draws
         if N_ > N / 2:
-            N, M0, M1, M2 = _sampleMoments(k, gmm, d[sel], tol, N, Nmax, sel_callback=sel_callback)
+            N, M0, M1, M2 = _sampleMoments(mean_k, covar_k, d[sel], tol, N, Nmax, sel_callback=sel_callback)
 
         # predict inside moments from outside draws
         else:
-            N, M0_, M1_, M2_ = _sampleMoments(k, gmm, d[~sel], tol, N, Nmax, sel_callback=sel_callback, invert_callback=True)
+            N, M0_, M1_, M2_ = _sampleMoments(mean_k, covar_k, d[~sel], tol, N, Nmax, sel_callback=sel_callback, invert_callback=True)
             M0 = max(tol, 1 - M0_) # prevent division by zero
-            M1 = (N*gmm.mean[k] - M1_* M0_ * N) / M0 / N
-            M2 = (N*gmm.covar[k] - M2_* M0_ * N) / M0 / N
+            M1 = (N * mean_k - M1_* M0_ * N) / M0 / N
+            M2 = (N * covar_k - M2_* M0_ * N) / M0 / N
+        """if T_inv_k is not None:
+            M2 -= noise"""
     else:
         M0 = 1
-        M1 = gmm.mean[k]
-        M2 = gmm.covar[k]
+        M1 = mean_k
+        M2 = covar_k
     return M0, M1, M2
