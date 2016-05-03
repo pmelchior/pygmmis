@@ -269,7 +269,7 @@ if __name__ == '__main__':
     # apply selection
     sel = cb(noisy)
     data = iemgmm.createShared(noisy[sel])
-    covar = iemgmm.createShared(np.tile(disp**2 * np.eye(D), (len(data), 1, 1)))
+    covar = disp**2 * np.eye(D)
 
     # plot data vs true model
     plotResults(orig, data, gmm, np.ones(1), patch=ps)
@@ -297,7 +297,6 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
 
-    """
     # 2) IEMGMM without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
@@ -310,7 +309,6 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
-    """
 
     # 3) IEMGMM with imputation, igoring errors
     start = datetime.datetime.now()
