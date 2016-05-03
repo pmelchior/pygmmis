@@ -248,7 +248,7 @@ def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=n
     gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataAtRandom, tol=1e-3, verbose=False):
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataAtRandom, tol=1e-3, verbose=False, return_neighborhoods=False):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     if sel_callback is None:
@@ -261,7 +261,14 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
             # inflate covar to accommodate changes from selection
             gmm.covar *= 4
         else:
-            gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=sel_callback, init_callback=init_callback, tol=tol, verbose=verbose)
+            gmm, neighborhood = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=sel_callback, init_callback=init_callback, tol=tol, verbose=verbose, return_neighborhoods=True)
+            # if the covariance of all data is equal: deconvolution can exactly
+            # be performed on the result of the selection-corrected gmm
+            if np.allclose(covar.std(axis=0), np.zeros_like(covar[0])):
+                if verbose >= 2:
+                    print "deconvolving model from constant covariance"
+                gmm.covar -= covar[0]
+                return gmm
 
     # set up pool
     import multiprocessing
@@ -275,7 +282,10 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     S = np.zeros(len(data)) # S = sum_k p(x|k)
     log_S = np.empty(len(data))
     N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
-    neighborhood = [None for k in xrange(gmm.K)]
+    try:
+        neighborhood
+    except NameError:
+        neighborhood = [None for k in xrange(gmm.K)]
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
 
@@ -338,7 +348,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
             k = 0
             for M0[k], M1[k], M2[k] in \
-            parmap.starmap(_computeMoments, zip(gmm.mean, gmm.covar, T_inv), sel_callback, pool=pool, chunksize=chunksize):
+            parmap.starmap(_computeMoments, zip(gmm.mean, gmm.covar), sel_callback, pool=pool, chunksize=chunksize):
                 k += 1
 
             if gmm.verbose:
@@ -381,6 +391,8 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         gmm.amp /= gmm.amp.sum()
 
     pool.close()
+    if return_neighborhoods:
+        return gmm, neighborhood
     return gmm
 
 def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None):
@@ -559,14 +571,9 @@ def _sampleMoments(mean, covar, d, tol, N, Nmax, sel_callback=None, invert_callb
     M0 = M0 * 1./N
     return N, M0, M1, M2
 
-def _computeMoments(mean_k, covar_k, T_inv_k, sel_callback=None, tol=1e-2):
+def _computeMoments(mean_k, covar_k, sel_callback=None, tol=1e-2):
     N = int(10/tol)
     Nmax = 100000
-
-    """
-    if T_inv_k is not None:
-        noise = np.linalg.inv(T_inv_k).mean(axis=0) - covar_k
-        covar_k += noise"""
 
     d, sel = _draw_select(mean_k, covar_k, N, sel_callback=sel_callback, return_sel=True)
     N_ = sel.sum()
@@ -583,8 +590,6 @@ def _computeMoments(mean_k, covar_k, T_inv_k, sel_callback=None, tol=1e-2):
             M0 = max(tol, 1 - M0_) # prevent division by zero
             M1 = (N * mean_k - M1_* M0_ * N) / M0 / N
             M2 = (N * covar_k - M2_* M0_ * N) / M0 / N
-        """if T_inv_k is not None:
-            M2 -= noise"""
     else:
         M0 = 1
         M1 = mean_k
