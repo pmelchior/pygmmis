@@ -97,7 +97,7 @@ class GMM(object):
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
-            bc = np.bincount(ind, minlength=size)
+            bc = np.bincount(ind, minlength=self.K)
             components = np.arange(ind.size)[bc > 0]
             for c in components:
                 mask = ind == c
@@ -542,6 +542,7 @@ def _I(gmm, size, sel_callback, neighborhood, covar=None, rng=np.random):
                     point = neighborhood[comp][rng.randint(0, len(neighborhood[comp]))]
                 covar2[i] = covar[point]
                 data2[i] = rng.multivariate_normal(gmm.mean[comp], gmm.covar[comp] + covar2[i], size=1)
+
 
     # FIXME: may want to decide whether to add noise  before selector of after
     sel2 = ~sel_callback(data2)
