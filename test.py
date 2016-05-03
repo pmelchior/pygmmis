@@ -237,10 +237,10 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
 if __name__ == '__main__':
 
     # set up RNG
-    seed = None
+    seed = 6141#np.random.randint(1, 10000)#None
     from numpy.random import RandomState
     rng = RandomState(seed)
-    verbose = 2
+    verbose = 3
 
     # draw N points from 3-component GMM
     N = 400
@@ -260,9 +260,8 @@ if __name__ == '__main__':
 
     orig = gmm.draw(N, rng=rng)
 
-
     # get observational selection function
-    cb, ps = getSelection("boxWithHole", rng=rng)
+    cb, ps = getSelection("tapered", rng=rng)
 
     # add isotropic errors on data
     disp = 0.8
@@ -277,7 +276,7 @@ if __name__ == '__main__':
 
     # make sure that the initial placement of the components
     # uses the same RNG for comparison
-    init_cb = partial(iemgmm.initializeFromDataAtRandom, rng=rng)
+    init_cb = iemgmm.initializeFromDataAtRandom
 
     # repeated runs: store results and logL
     K = 3
@@ -289,7 +288,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, rng=rng, verbose=verbose)
         l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -303,7 +302,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, verbose=verbose)
+        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, rng=rng, verbose=verbose)
         l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -317,7 +316,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
+        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, rng=rng, verbose=verbose)
         l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean
@@ -330,7 +329,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, verbose=verbose)
+        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, rng=rng, verbose=verbose)
         l[r] = imp_(data).mean()
         imp.amp[r*K:(r+1)*K] = imp_.amp
         imp.mean[r*K:(r+1)*K,:] = imp_.mean

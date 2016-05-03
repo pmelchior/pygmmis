@@ -248,27 +248,21 @@ def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=n
     gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataAtRandom, tol=1e-3, verbose=False, return_neighborhoods=False):
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataAtRandom, tol=1e-3, rng=np.random, verbose=False, return_neighborhoods=False):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     if sel_callback is None:
         # init components
-        init_callback(gmm, data=data, covar=covar)
+        init_callback(gmm, data=data, covar=covar, rng=rng)
     else:
+        gmm = fit(data, covar=covar, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
         if covar is None:
             # run default EM first
-            gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, verbose=verbose)
+            gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
             # inflate covar to accommodate changes from selection
             gmm.covar *= 4
         else:
-            gmm, neighborhood = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=sel_callback, init_callback=init_callback, tol=tol, verbose=verbose, return_neighborhoods=True)
-            # if the covariance of all data is equal: deconvolution can exactly
-            # be performed on the result of the selection-corrected gmm
-            if np.allclose(covar.std(axis=0), np.zeros_like(covar[0])):
-                if verbose >= 2:
-                    print "deconvolving model from constant covariance"
-                gmm.covar -= covar[0]
-                return gmm
+            gmm, neighborhood = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=sel_callback, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose, return_neighborhoods=True)
 
     # set up pool
     import multiprocessing
@@ -292,18 +286,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
     # compute volumes as proxy for component change
     V = np.linalg.det(gmm.covar)
 
-    # save the M sums from observed data
-    A = np.empty(gmm.K)
-    M = np.empty((gmm.K, gmm.D))
-    C = np.empty((gmm.K, gmm.D, gmm.D))
-
-    # moments of components under selection; need to be global for final update
-    M0 = M1 = M2 = None
-    if sel_callback is not None:
-        M0 = np.empty(gmm.K)
-        M1 = np.empty((gmm.K, gmm.D))
-        M2 = np.empty((gmm.K, gmm.D, gmm.D))
-
     # begin EM
     it = 0
     maxiter = max(100, gmm.K)
@@ -313,7 +295,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
-        for gmm.amp[k], gmm.mean[k], gmm.covar[k], log_p[k], neighborhood[k], T_inv[k] in \
+        for log_p[k], neighborhood[k], T_inv[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, init_callback, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
@@ -329,14 +311,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
             if sel_callback is None:
                 print ""
 
-        # perform sums for M step in the pool
-        k = 0
-        for A[k], M[k], C[k] in \
-        parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
-            k += 1
-
-        # need to do MC integral of p(missing | k):
-        # get missing data by imputation from the current model
         if sel_callback is not None:
             # with imputation the observed data logL can decrease.
             # revert to previous model if that is the case
@@ -346,20 +320,8 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
                 gmm = gmm_
                 break
 
-            k = 0
-            for M0[k], M1[k], M2[k] in \
-            parmap.starmap(_computeMoments, zip(gmm.mean, gmm.covar), sel_callback, pool=pool, chunksize=chunksize):
-                k += 1
-
-            if gmm.verbose:
-                print (M0 < 1).sum()
-                if verbose >= 3:
-                    print "component inside fractions: ",
-                    print ("%.2f," * gmm.K) % tuple(M0)
-
         # perform M step with M-sums of data and imputations runs
-        # calculates updated volume on the fly
-        V_ = _M(gmm, A, M, C, N_, w, M0, M1, M2)
+        _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=covar, w=w, sel_callback=sel_callback, pool=pool, chunksize=chunksize, rng=rng)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -374,6 +336,7 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
 
         # check new component volumes and reset sel when it grows by
         # more then 25%
+        V_ = np.linalg.det(gmm.covar)
         changed = np.flatnonzero((V_- V)/V > 0.25)
         for c in changed:
             neighborhood[c] = None
@@ -384,11 +347,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         S[:] = 0
         N[:] = 0
         it += 1
-
-    if sel_callback is not None:
-        # update component amplitudes for the missing fraction
-        gmm.amp[:] /= M0[:] / M0.sum()
-        gmm.amp /= gmm.amp.sum()
 
     pool.close()
     if return_neighborhoods:
@@ -416,18 +374,6 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None
     # changes to neighborhood will be minimal
     if cutoff is not None:
         indices = chi2 < cutoff*cutoff*gmm.D
-
-        # the component has no points associated with it: re-initialize it
-        if not indices.any():
-            if gmm.verbose >= 2:
-                print "re-initializing component %d with empty neighborhood" % k
-            if init_callback is not None:
-                amp_ = gmm.amp[k]
-                init_callback(gmm, k=k, data=data, covar=covar)
-                gmm.amp[k] = amp_
-            neighborhood_k = None
-            return _E(k, neighborhood_k, gmm, data, covar=covar, cutoff=cutoff, init_callback=init_callback)
-
         chi2 = chi2[indices]
         if covar is not None:
             T_inv_k = T_inv_k[indices]
@@ -440,13 +386,46 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return gmm.amp[k], gmm.mean[k], gmm.covar[k], np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
 
-def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
-    # compute the new amplitude from the observed points only!
-    # adjustment for missing points at the very end
-    gmm.amp[:] = A / n_points
 
+def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
+
+    # save the M sums from observed data
+    A = np.empty(gmm.K)
+    M = np.empty((gmm.K, gmm.D))
+    C = np.empty((gmm.K, gmm.D, gmm.D))
+    N = len(data)
+
+    # perform serially because huge copies involved otherwise
+    for k in xrange(gmm.K):
+        A[k], M[k], C[k] = _computeMSums(gmm, k, data, neighborhood[k], log_p[k], T_inv[k], log_S)
+
+    if sel_callback is not None:
+        over = 1
+        tol = 1e-2
+        size = N*over
+        A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        A2 /= over
+        M2 /= over
+        C2 /= over
+        N2 /= over
+
+        if gmm.verbose:
+            sel_outside = A2 > tol * A
+            print sel_outside.sum()
+            if gmm.verbose >= 3 and sel_outside.any():
+                print "component inside fractions: ",
+                print ("%.2f," * gmm.K) % tuple(A/(A+A2))
+    else:
+        A2 = M2 = C2 = N2 = 0
+
+    # M-step for all components using data and data2
+    gmm.amp[:] = (A + A2)/ (N + N2)
+    # because of finite precision during the imputation: renormalize
+    gmm.amp /= gmm.amp.sum()
+
+    gmm.mean[:,:] = (M + M2)/(A + A2)[:,None]
     # minimum covariance term?
     if w > 0:
         # we assume w to be a lower bound of the isotropic dispersion,
@@ -454,50 +433,13 @@ def _M(gmm, A, M, C, n_points, w=0., M0=None, M1=None, M2=None):
         # then eq. 38 in Bovy et al. only ~works for N = 0 because of the
         # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
         # On average, q_j = N/K, so we'll adopt that to correct.
-        w_eff = w**2 * (n_points*1./gmm.K + 1)
-        C_ = (C + w_eff*np.eye(gmm.D)[None,:,:]) / (A + 1)[:,None,None]
+        w_eff = w**2 * ((N+N2)*1./gmm.K + 1)
+        gmm.covar[:,:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:]) / (A + A2 + 1)[:,None,None]
     else:
-        C_ = C / A[:,None,None]
+        gmm.covar[:,:,:] = (C + C2) / (A + A2)[:,None,None]
 
-    if M0 is None:
-        gmm.mean[:,:] = M / A[:,None]
-        gmm.covar[:,:,:] = C_
-        V = np.linalg.det(gmm.covar)
-    else:
-        # only update components for which the selection corrections are
-        # reasonably well determined.
-        M0_limit = 0.1
-        good = M0 > M0_limit
-        # also check of covariance remains positive definite:
-        # instead of eigenvalues, use cholesky:
-        # http://stackoverflow.com/questions/16266720/
-        try:
-            L = np.linalg.cholesky(C_ + gmm.covar - M2)
-            V = np.prod(np.diagonal(L, axis1=1, axis2=2), axis=1)**2
-        except np.linalg.LinAlgError:
-            V = np.empty(gmm.K)
-            for k in xrange(gmm.K):
-                try:
-                    L = np.linalg.cholesky(C_[k] + gmm.covar[k] - M2[k])
-                    V[k] = np.prod(np.diag(L))**2
-                except np.linalg.LinAlgError:
-                    good[k] = 0
-                    V[k] = np.linalg.det(gmm.covar[k])
 
-        if good.all():
-            gmm.mean[:,:] = M / A[:,None] + gmm.mean - M1
-            gmm.covar[:,:,:] = C_ + gmm.covar - M2
-        else:
-            gmm.mean[good,:] = M[good,:] / A[good,None] + gmm.mean[good,:] - M1[good,:]
-            gmm.covar[good,:,:] = C_[good,:,:] + gmm.covar[good,:,:] - M2[good,:,:]
-            # freeze components when the move off too much
-            gmm.mean[~good,:] = gmm.mean[~good,:]
-            gmm.covar[~good,:,:] = gmm.covar[~good,:,:]
-            # restrict M0 to limit
-            M0[~good] = M0_limit
-    return V
-
-def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
+def _computeMSums(gmm, k, data, neighborhood_k, log_p_k, T_inv_k, log_S):
     # form log_q_ik by dividing with S = sum_k p_ik
     # NOTE:  this modifies log_p_k in place!
     # NOTE2: reshape needed when neighborhood_k is None because of its
@@ -535,63 +477,66 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
     return A_k, M_k, C_k
 
-def _draw_select(mean, covar, N, sel_callback=None, invert_callback=False, return_sel=False):
-    # simple helper function to draw samples from a single component
-    # potentially with a selection function
-    data = np.random.multivariate_normal(mean, covar, size=N)
-    if sel_callback is not None:
-        sel = sel_callback(data)
-        if invert_callback:
-            sel = np.invert(sel)
-        if return_sel:
-            return data, sel
-        return data[sel]
-    return data
+def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=None, pool=None, chunksize=1, rng=np.random):
+    # create fake data with same mechanism as the original data,
+    # but invert selection to get the missing part
+    data2, covar2 = _I(gmm, size, sel_callback, neighborhood, covar=covar, rng=rng)
 
-def _sampleMoments(mean, covar, d, tol, N, Nmax, sel_callback=None, invert_callback=False):
-    while True:
-        M0 = len(d)
-        M1 = d.sum(axis=0) / M0
-        varM1 = ((d - M1)**2).sum(axis=0) / (M0-1)
-        if (varM1 / M0 < (M1 * tol)**2).all() or N >= Nmax:
-            break
-        # sample size to achieve tol
-        M0_ = int((varM1 / (M1*tol)**2).max())
-        # extra points (beyond M0) to achive, correct for selection loss
-        # make sure to at least double N (for the effort), but to stay within Nmax
-        extra = min(Nmax, max(N, int((M0_ - M0) / (M0 * 1./ N))))
-        d = np.concatenate((d, _draw_select(mean, covar, extra, sel_callback, invert_callback)))
-        N += extra
+    A2 = np.zeros(gmm.K)
+    M2 = np.zeros((gmm.K, gmm.D))
+    C2 = np.zeros((gmm.K, gmm.D, gmm.D))
+    N2 = len(data2)
 
-    # covariance: sum_i (x_i - mu_k)^T(x_i - mu_k)
-    # Note: error on covariance larger than tol, but correction of means
-    # more important, so we'll ignore that
-    d_m = d - mean
-    M2 = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / M0
-    M0 = M0 * 1./N
-    return N, M0, M1, M2
+    if N2:
+        # similar setup as above, but since imputated points
+        # are drawn from the model, we can avoid the caution of
+        # dealing with outliers: all points will be considered
+        S2 = np.zeros(len(data2))
+        neighborhood2 = [None for k in xrange(gmm.K)]
+        log_p2 = [[] for k in xrange(gmm.K)]
+        T2_inv = [None for k in xrange(gmm.K)]
 
-def _computeMoments(mean_k, covar_k, sel_callback=None, tol=1e-2):
-    N = int(10/tol)
-    Nmax = 100000
+        # run E-step: only needed to account for components that
+        # overlap outside. Otherwise log_q_ik = 0 for all i,k,
+        # i.e. all sums have flat weights
+        import parmap
+        k = 0
+        for log_p2[k], neighborhood2[k], T2_inv[k] in \
+        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood2), gmm, data2, covar2, cutoff, pool=pool, chunksize=chunksize):
+            S2[neighborhood2[k]] += np.exp(log_p2[k])
+            k += 1
 
-    d, sel = _draw_select(mean_k, covar_k, N, sel_callback=sel_callback, return_sel=True)
-    N_ = sel.sum()
-    # selection affects component
-    if N_ < N * (1 - tol):
+        # since log(0) isn't a good idea, need to restrict to N
+        log_S2 = np.log(S2)
+        N2 = len(data2)
 
-        # component most inside: use inside draws
-        if N_ > N / 2:
-            N, M0, M1, M2 = _sampleMoments(mean_k, covar_k, d[sel], tol, N, Nmax, sel_callback=sel_callback)
+        for k in xrange(gmm.K):
+            A2[k], M2[k], C2[k] = _computeMSums(gmm, k, data2, neighborhood2[k], log_p2[k], T2_inv[k], log_S2)
+    return A2, M2, C2, N2
 
-        # predict inside moments from outside draws
-        else:
-            N, M0_, M1_, M2_ = _sampleMoments(mean_k, covar_k, d[~sel], tol, N, Nmax, sel_callback=sel_callback, invert_callback=True)
-            M0 = max(tol, 1 - M0_) # prevent division by zero
-            M1 = (N * mean_k - M1_* M0_ * N) / M0 / N
-            M2 = (N * covar_k - M2_* M0_ * N) / M0 / N
+def _I(gmm, size, sel_callback, neighborhood, covar=None, rng=np.random):
+
+    if covar is None:
+        data2 = gmm.draw(size, rng=rng)
     else:
-        M0 = 1
-        M1 = mean_k
-        M2 = covar_k
-    return M0, M1, M2
+        # draw indices for components given amplitudes
+        # TODO: This could be done a lot faster if covar = const.
+        data2 = np.empty((size, gmm.D))
+        covar2 = np.empty((size, gmm.D, gmm.D))
+        for i in xrange(size):
+            comp = rng.choice(gmm.K, size=1, p=gmm.amp)[0]
+            # random point in neighborhood of comp to get covar from
+            if neighborhood[comp] is None:
+                point = rng.randint(0, len(covar))
+            else:
+                point = neighborhood[comp][rng.randint(0, len(neighborhood[comp]))]
+            covar2[i] = covar[point]
+            data2[i] = rng.multivariate_normal(gmm.mean[comp], gmm.covar[comp] + covar2[i], size=1)
+
+    # FIXME: may want to decide whether to add noise  before selector of after
+    sel2 = ~sel_callback(data2)
+
+    if covar is None:
+        return data2[sel2], None
+    else:
+        return data2[sel2], covar2[sel2]
