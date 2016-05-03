@@ -255,7 +255,6 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # init components
         init_callback(gmm, data=data, covar=covar, rng=rng)
     else:
-        gmm = fit(data, covar=covar, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
         if covar is None:
             # run default EM first
             gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
