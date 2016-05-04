@@ -396,9 +396,12 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
     C = np.empty((gmm.K, gmm.D, gmm.D))
     N = len(data)
 
-    # perform serially because huge copies involved otherwise
-    for k in xrange(gmm.K):
-        A[k], M[k], C[k] = _computeMSums(gmm, k, data, neighborhood[k], log_p[k], T_inv[k], log_S)
+    # perform sums for M step in the pool
+    import parmap
+    k = 0
+    for A[k], M[k], C[k] in \
+    parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
+        k += 1
 
     if sel_callback is not None:
         over = 1
@@ -438,7 +441,7 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
         gmm.covar[:,:,:] = (C + C2) / (A + A2)[:,None,None]
 
 
-def _computeMSums(gmm, k, data, neighborhood_k, log_p_k, T_inv_k, log_S):
+def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     # form log_q_ik by dividing with S = sum_k p_ik
     # NOTE:  this modifies log_p_k in place!
     # NOTE2: reshape needed when neighborhood_k is None because of its
@@ -509,8 +512,11 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         log_S2 = np.log(S2)
         N2 = len(data2)
 
-        for k in xrange(gmm.K):
-            A2[k], M2[k], C2[k] = _computeMSums(gmm, k, data2, neighborhood2[k], log_p2[k], T2_inv[k], log_S2)
+        k = 0
+        for A2[k], M2[k], C2[k] in \
+        parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
+            k += 1
+
     return A2, M2, C2, N2
 
 def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.mean, rng=np.random):
