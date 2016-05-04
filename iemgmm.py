@@ -516,7 +516,7 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
             A2[k], M2[k], C2[k] = _computeMSums(gmm, k, data2, neighborhood2[k], log_p2[k], T2_inv[k], log_S2)
     return A2, M2, C2, N2
 
-def _I(gmm, size, sel_callback, neighborhood, covar=None, rng=np.random):
+def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.median, rng=np.random):
 
     if covar is None:
         data2 = gmm.draw(size, rng=rng)
@@ -533,16 +533,33 @@ def _I(gmm, size, sel_callback, neighborhood, covar=None, rng=np.random):
             # draw indices for components given amplitudes
             data2 = np.empty((size, gmm.D))
             covar2 = np.empty((size, gmm.D, gmm.D))
-            for i in xrange(size):
-                comp = rng.choice(gmm.K, size=1, p=gmm.amp)[0]
-                # random point in neighborhood of comp to get covar from
-                if neighborhood[comp] is None:
-                    point = rng.randint(0, len(covar))
-                else:
-                    point = neighborhood[comp][rng.randint(0, len(neighborhood[comp]))]
-                covar2[i] = covar[point]
-                data2[i] = rng.multivariate_normal(gmm.mean[comp], gmm.covar[comp] + covar2[i], size=1)
 
+            # use reduce function on data covariance associated with
+            # each component
+            if covar_reduce_fct is not None:
+                ind = rng.choice(gmm.K, size=size, p=gmm.amp)
+                counter = 0
+                for k in xrange(gmm.K):
+                    points = ind == k
+                    N_k = points.sum()
+                    if N_k:
+                        covar_k = covar_reduce_fct(covar[neighborhood[k]])
+                        covar2[counter:counter+N_k,:,:] = covar_k
+                        data2[counter:counter+N_k,:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N_k)
+                        counter += N_k
+
+            # every datum get an independent draw from available covars:
+            # really slow!
+            else:
+                for i in xrange(size):
+                    comp = rng.choice(gmm.K, size=1, p=gmm.amp)[0]
+                    # random point in neighborhood of comp to get covar from
+                    if neighborhood[comp] is None:
+                        point = rng.randint(0, len(covar))
+                    else:
+                        point = neighborhood[comp][rng.randint(0, len(neighborhood[comp]))]
+                    covar2[i] = covar[point]
+                    data2[i] = rng.multivariate_normal(gmm.mean[comp], gmm.covar[comp] + covar2[i], size=1)
 
     # FIXME: may want to decide whether to add noise  before selector of after
     sel2 = ~sel_callback(data2)
