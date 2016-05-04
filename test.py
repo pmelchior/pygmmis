@@ -253,7 +253,7 @@ if __name__ == '__main__':
     seed = 6141#np.random.randint(1, 10000)#None
     from numpy.random import RandomState
     rng = RandomState(seed)
-    verbose = 3
+    iemgmm.VERBOSITY = 3
     w = 0.1
     cutoff = 5
 
@@ -300,7 +300,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        iemgmm.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng, verbose=verbose)
+        iemgmm.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -313,7 +313,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng, verbose=verbose)
+        imp_ = iemgmm.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -333,7 +333,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng, verbose=verbose)
+        imp_ = iemgmm.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -346,7 +346,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng, verbose=verbose)
+        imp_ = iemgmm.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean

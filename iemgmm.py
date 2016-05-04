@@ -63,8 +63,7 @@ def logsum(logX, axis=0):
     return np.log(np.exp(logX + c[c_shape]).sum(axis=axis)) - c
 
 class GMM(object):
-    def __init__(self, K=1, D=1, verbose=False):
-        self.verbose = verbose
+    def __init__(self, K=1, D=1):
         self.amp = np.zeros((K))
         self.mean = np.empty((K,D))
         self.covar = np.empty((K,D,D))
@@ -204,6 +203,7 @@ class GMM(object):
 ############################
 # Begin of fit functions
 ############################
+VERBOSITY = False
 
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if k is None:
@@ -221,7 +221,7 @@ def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
         from scipy.special import gamma
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
-        if gmm.verbose >= 2:
+        if VERBOSITY >= 2:
             print "initializing spheres with s=%.2f in data domain" % s
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
@@ -243,15 +243,15 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
         max_pos = data.max(axis=0)
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
-        if gmm.verbose >= 2:
+        if VERBOSITY >= 2:
             print "initializing spheres with s=%.2f near data points" % s
     gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 # Run a simple GMM to initialize a tricky one:
-def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, verbose=False, covar_factor=1.):
+def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, covar_factor=1.):
     # 1) run GMM without error and selection (fit is essentially an init fct)
-    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
+    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng)
     # 2) adjust the covariance to allow to provide more support
     # in missing volume
     gmm.covar[:,:,:] *= covar_factor
@@ -267,7 +267,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random, verbose=False, return_neighborhoods=False):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random, return_neighborhoods=False):
 
     # init components
     init_callback(gmm, data=data, covar=covar, rng=rng)
@@ -314,8 +314,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         log_L_ = log_S[N].mean()
         N_ = N.sum()
 
-        if gmm.verbose:
-            print ("%d\t%d\t%.4f" % (it, N_, log_L_)),
+        if VERBOSITY:
+            print ("%d\t%d\t%.3f" % (it, N_, log_L_)),
             if sel_callback is None:
                 print ""
 
@@ -323,7 +323,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
             # with imputation the observed data logL can decrease.
             # revert to previous model if that is the case
             if it > 0 and log_L_ < log_L:
-                if gmm.verbose:
+                if VERBOSITY:
                     print "\nmean likelihood decreased: stopping reverting to previous model."
                 gmm = gmm_
                 break
@@ -333,7 +333,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
-            if gmm.verbose >= 2:
+            if VERBOSITY >= 2:
                 print "mean likelihood converged within tolerance %r: stopping here." % tol
             break
 
@@ -349,7 +349,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         for c in changed:
             neighborhood[c] = None
             V[c] = V_[c]
-        if gmm.verbose >= 2 and changed.any():
+        if VERBOSITY >= 2 and changed.any():
             print "resetting neighborhoods due to volume change: ",
             print ("(" + "%d," * len(changed) + ")") % tuple(changed)
         S[:] = 0
@@ -419,16 +419,16 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
         over = 100
         tol = 1e-2
         size = N*over
-        A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        A2, M2, C2, N2, log_L2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
         A2 /= over
         M2 /= over
         C2 /= over
         N2 /= over
 
-        if gmm.verbose:
+        if VERBOSITY:
             sel_outside = A2 > tol * A
-            print "\t%.4f\t%d" % (log_L2, sel_outside.sum())
-            if gmm.verbose >= 3 and sel_outside.any():
+            print "\t%.3f\t%d" % (log_L2, sel_outside.sum())
+            if VERBOSITY >= 3 and sel_outside.any():
                 print "component inside fractions: ",
                 print ("%.2f," * gmm.K) % tuple(A/(A+A2))
     else:
@@ -531,7 +531,7 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
             k += 1
 
-    return A2, M2, C2, N2
+    return A2, M2, C2, N2, log_L2
 
 def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.mean, rng=np.random):
 
