@@ -205,7 +205,7 @@ class GMM(object):
 # Begin of fit functions
 ############################
 
-def initializeFromDataMinMax(gmm, k=None, data=None, covar=None, s=None, rng=np.random):
+def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if k is None:
         k = slice(None)
     gmm.amp[k] = 1./gmm.K
@@ -225,7 +225,7 @@ def initializeFromDataMinMax(gmm, k=None, data=None, covar=None, s=None, rng=np.
             print "initializing spheres with s=%.2f in data domain" % s
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=np.random):
+def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if k is None:
         k = slice(None)
         k_len = gmm.K
@@ -248,17 +248,29 @@ def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=n
     gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, init_callback=initializeFromDataAtRandom, tol=1e-3, rng=np.random, verbose=False, return_neighborhoods=False):
-    gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
+# Run a simple GMM to initialize a tricky one:
+def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, verbose=False, covar_factor=1.):
+    # 1) run GMM without error and selection (fit is essentially an init fct)
+    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
+    # 2) adjust the covariance to allow to provide more support
+    # in missing volume
+    gmm.covar[:,:,:] *= covar_factor
 
-    if sel_callback is None:
-        # init components
-        init_callback(gmm, data=data, covar=covar, rng=rng)
-    else:
-        # run default EM first
-        gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
-        # inflate covar to accommodate changes from selection
-        gmm.covar *= 4
+    # if k is set: only use fit init for given k, re-init the others
+    if k is not None:
+        k_ = set(range(gmm.K))
+        try:
+            k_len = len(gmm.amp[k])
+            k_ -= set(k)
+        except TypeError:
+            k_ -= set([k])
+        init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
+
+
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random, verbose=False, return_neighborhoods=False):
+
+    # init components
+    init_callback(gmm, data=data, covar=covar, rng=rng)
 
     # set up pool
     import multiprocessing
@@ -404,7 +416,7 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
         k += 1
 
     if sel_callback is not None:
-        over = 1
+        over = 100
         tol = 1e-2
         size = N*over
         A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
@@ -415,7 +427,7 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
 
         if gmm.verbose:
             sel_outside = A2 > tol * A
-            print sel_outside.sum()
+            print "\t%.4f\t%d" % (log_L2, sel_outside.sum())
             if gmm.verbose >= 3 and sel_outside.any():
                 print "component inside fractions: ",
                 print ("%.2f," * gmm.K) % tuple(A/(A+A2))
@@ -488,6 +500,7 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
     M2 = np.zeros((gmm.K, gmm.D))
     C2 = np.zeros((gmm.K, gmm.D, gmm.D))
     N2 = len(data2)
+    log_L2 = 0
 
     if N2:
         # similar setup as above, but since imputated points
@@ -508,9 +521,10 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
             S2[neighborhood2[k]] += np.exp(log_p2[k])
             k += 1
 
-        # since log(0) isn't a good idea, need to restrict to N
+        # don't have to worry about outliers from the model
         log_S2 = np.log(S2)
         N2 = len(data2)
+        log_L2 = log_S2.mean()
 
         k = 0
         for A2[k], M2[k], C2[k] in \
@@ -565,7 +579,7 @@ def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.me
                     data2[i] = rng.multivariate_normal(gmm.mean[comp], gmm.covar[comp] + covar2[i], size=1)
 
     # FIXME: may want to decide whether to add noise  before selector of after
-    sel2 = ~sel_callback(data2)
+    sel2 = ~sel_callback(data2, gmm=gmm)
 
     if covar is None or covar.shape == (gmm.D, gmm.D):
         return data2[sel2], covar2

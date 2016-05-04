@@ -150,50 +150,6 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
     plt.tight_layout()
     plt.show()
 
-
-def getBox(coords):
-    box_limits = np.array([[0,0],[10,10]])
-    return (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
-
-def getHole(coords):
-    x,y,r = 6.5, 6., 2
-    return ((coords[:,0] - x)**2 + (coords[:,1] - y)**2 > r**2)
-
-def getBoxWithHole(coords):
-    return getBox(coords)*getHole(coords)
-
-def getHalfDensity(coords, rng=np.random):
-    mask = np.ones(coords.shape[0], dtype='bool')
-    mask[rng.rand(coords.shape[0]) < 0.5] = 0
-    return mask
-
-def getTaperedDensity(coords, rng=np.random):
-    mask = np.ones(coords.shape[0], dtype='bool')
-    mask[rng.rand(coords.shape[0]) < coords[:,0]/8] = 0
-    return mask
-
-def getCut(coords):
-    return (coords[:,0] < 7)
-
-def getSelection(type="hole", rng=np.random):
-    if type == "hole":
-        cb = getHole
-        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
-    if type == "box":
-        cb = getBox
-        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
-    if type == "boxWithHole":
-        cb = getBoxWithHole
-        ps = [patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted'),
-            patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')]
-    if type == "cut":
-        cb = getCut
-        ps = lines.Line2D([7, 7],[-5, 15], ls='dotted', color='b')
-    if type == "tapered":
-        cb = partial(getTaperedDensity, rng=rng)
-        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
-    return cb, ps
-
 def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
     # create a new gmm with randomly drawn components at each point in coords:
     # estimate how this gmm can cover the volume spanned by coords
@@ -234,13 +190,72 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
             coverage[inv_sel] = outside_cov
     return coverage
 
+def getBox(coords, gmm=None):
+    box_limits = np.array([[0,0],[10,10]])
+    return (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
+
+def getHole(coords, gmm=None):
+    x,y,r = 6.5, 6., 2
+    return ((coords[:,0] - x)**2 + (coords[:,1] - y)**2 > r**2)
+
+def getBoxWithHole(coords, gmm=None):
+    return getBox(coords)*getHole(coords)
+
+def getHalfDensity(coords, gmm=None, rng=np.random):
+    mask = np.ones(coords.shape[0], dtype='bool')
+    mask[rng.rand(coords.shape[0]) < 0.5] = 0
+    return mask
+
+def getTaperedDensity(coords, gmm=None, rng=np.random):
+    mask = np.ones(coords.shape[0], dtype='bool')
+    mask[rng.rand(coords.shape[0]) < coords[:,0]/8] = 0
+    return mask
+
+def getCut(coords, gmm=None):
+    return (coords[:,0] < 7)
+
+def getOver(coords, gmm):
+    p_x = gmm(coords)
+    return p_x > 0.01
+
+def getUnder(coords, gmm):
+    p_x = gmm(coords)
+    return p_x < 0.025
+
+def getSelection(type="hole", rng=np.random):
+    if type == "hole":
+        cb = getHole
+        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+    if type == "box":
+        cb = getBox
+        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
+    if type == "boxWithHole":
+        cb = getBoxWithHole
+        ps = [patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted'),
+            patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')]
+    if type == "cut":
+        cb = getCut
+        ps = lines.Line2D([7, 7],[-5, 15], ls='dotted', color='b')
+    if type == "tapered":
+        cb = partial(getTaperedDensity, rng=rng)
+        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
+    if type == "under":
+        cb = getUnder
+        ps = None
+    if type == "over":
+        cb = getOver
+        ps = None
+    return cb, ps
+
 if __name__ == '__main__':
 
-    # set up RNG
+    # set up test
     seed = 6141#np.random.randint(1, 10000)#None
     from numpy.random import RandomState
     rng = RandomState(seed)
     verbose = 3
+    w = 0.1
+    cutoff = 5
 
     # draw N points from 3-component GMM
     N = 400
@@ -261,26 +276,23 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("tapered", rng=rng)
+    cb, ps = getSelection("cut", rng=rng)
 
     # add isotropic errors on data
     disp = 0.8
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
-    sel = cb(noisy)
+    sel = cb(noisy, gmm)
     data = iemgmm.createShared(noisy[sel])
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
     plotResults(orig, data, gmm, np.ones(1), patch=ps)
 
-    # make sure that the initial placement of the components
-    # uses the same RNG for comparison
-    init_cb = iemgmm.initializeFromDataAtRandom
-
     # repeated runs: store results and logL
     K = 3
     R = 10
+    gmm_ = iemgmm.GMM(K=K, D=D)
     imp = iemgmm.GMM(K=K*R, D=D)
     l = np.empty(R)
 
@@ -288,11 +300,11 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, rng=rng, verbose=verbose)
-        l[r] = imp_(data).mean()
-        imp.amp[r*K:(r+1)*K] = imp_.amp
-        imp.mean[r*K:(r+1)*K,:] = imp_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+        iemgmm.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng, verbose=verbose)
+        l[r] = gmm_(data).mean()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
@@ -301,24 +313,31 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, rng=rng, verbose=verbose)
-        l[r] = imp_(data).mean()
-        imp.amp[r*K:(r+1)*K] = imp_.amp
-        imp.mean[r*K:(r+1)*K,:] = imp_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+        imp_ = iemgmm.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng, verbose=verbose)
+        l[r] = gmm_(data).mean()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
 
     # 3) IEMGMM with imputation, igoring errors
+    # We need a better init function to allow the model to
+    # start from a good initial location and to explore the
+    # volume that is spanned by the missing part of the data
+    # NOTE: You want to choose this carefully, depending
+    # on the missingness mechanism.
+    init_cb = partial(iemgmm.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
+
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, rng=rng, verbose=verbose)
-        l[r] = imp_(data).mean()
-        imp.amp[r*K:(r+1)*K] = imp_.amp
-        imp.mean[r*K:(r+1)*K,:] = imp_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+        imp_ = iemgmm.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng, verbose=verbose)
+        l[r] = gmm_(data).mean()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
@@ -327,11 +346,11 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(data, covar=covar, K=K, w=0.1, init_callback=init_cb, cutoff=5, sel_callback=cb, rng=rng, verbose=verbose)
-        l[r] = imp_(data).mean()
-        imp.amp[r*K:(r+1)*K] = imp_.amp
-        imp.mean[r*K:(r+1)*K,:] = imp_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = imp_.covar
+        imp_ = iemgmm.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng, verbose=verbose)
+        l[r] = gmm_(data).mean()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
