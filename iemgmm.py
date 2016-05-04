@@ -255,13 +255,10 @@ def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=N
         # init components
         init_callback(gmm, data=data, covar=covar, rng=rng)
     else:
-        if covar is None:
-            # run default EM first
-            gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
-            # inflate covar to accommodate changes from selection
-            gmm.covar *= 4
-        else:
-            gmm, neighborhood = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=sel_callback, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose, return_neighborhoods=True)
+        # run default EM first
+        gmm = fit(data, covar=None, K=K, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng, verbose=verbose)
+        # inflate covar to accommodate changes from selection
+        gmm.covar *= 4
 
     # set up pool
     import multiprocessing
