@@ -516,7 +516,7 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
             A2[k], M2[k], C2[k] = _computeMSums(gmm, k, data2, neighborhood2[k], log_p2[k], T2_inv[k], log_S2)
     return A2, M2, C2, N2
 
-def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.median, rng=np.random):
+def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.mean, rng=np.random):
 
     if covar is None:
         data2 = gmm.draw(size, rng=rng)
@@ -543,7 +543,7 @@ def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.me
                     points = ind == k
                     N_k = points.sum()
                     if N_k:
-                        covar_k = covar_reduce_fct(covar[neighborhood[k]])
+                        covar_k = covar_reduce_fct(covar[neighborhood[k]], axis=0)
                         covar2[counter:counter+N_k,:,:] = covar_k
                         data2[counter:counter+N_k,:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N_k)
                         counter += N_k
