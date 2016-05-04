@@ -97,7 +97,7 @@ class GMM(object):
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
-            bc = np.bincount(ind, minlength=self.K)
+            bc = np.bincount(ind, minlength=size)
             components = np.arange(ind.size)[bc > 0]
             for c in components:
                 mask = ind == c
