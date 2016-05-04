@@ -248,7 +248,7 @@ def initializeFromDataAtRandom(gmm, k=None, data=None, covar=None, s=None, rng=n
     gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, N_missing=None, init_callback=initializeFromDataAtRandom, tol=1e-3, rng=np.random, verbose=False, return_neighborhoods=False):
+def fit(data, covar=None, K=1, w=0., cutoff=None, sel_callback=None, init_callback=initializeFromDataAtRandom, tol=1e-3, rng=np.random, verbose=False, return_neighborhoods=False):
     gmm = GMM(K=K, D=data.shape[1], verbose=verbose)
 
     if sel_callback is None:
