@@ -201,7 +201,7 @@ class GMM(object):
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
     def overlappingWith(self, k, cutoff=5):
-        chi2_k = self.logL_k(k, self.mean[k] - self.mean, covar=self.covar, chi2_only=True)
+        chi2_k = self.logL_k(k, self.mean, covar=self.covar, chi2_only=True)
         return np.flatnonzero(chi2_k < cutoff*cutoff*self.D)
 
 
@@ -416,7 +416,7 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=
     # perform sums for M step in the pool
     import parmap
     k = 0
-    for A[k], M[k], C[k] in \
+    for A[k], M[k,:], C[k,:,:] in \
     parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
 
@@ -459,42 +459,45 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=
 
 
 def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
-    # form log_q_ik by dividing with S = sum_k p_ik
-    # NOTE:  this modifies log_p_k in place!
-    # NOTE2: reshape needed when neighborhood_k is None because of its
-    # implicit meaning as np.newaxis (which would create a 2D array)
-    log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
+    if log_p_k.size:
+        # form log_q_ik by dividing with S = sum_k p_ik
+        # NOTE:  this modifies log_p_k in place!
+        # NOTE2: reshape needed when neighborhood_k is None because of its
+        # implicit meaning as np.newaxis (which would create a 2D array)
+        log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
 
-    # amplitude: A_k = sum_i q_ik
-    A_k = np.exp(logsum(log_p_k))
+        # amplitude: A_k = sum_i q_ik
+        A_k = np.exp(logsum(log_p_k))
 
-    # in fact: q_ik, but we treat sample index i silently everywhere
-    qk = np.exp(log_p_k)
+        # in fact: q_ik, but we treat sample index i silently everywhere
+        qk = np.exp(log_p_k)
 
-    # data with errors?
-    d = data[neighborhood_k].reshape((log_p_k.size, gmm.D))
-    if T_inv_k is None:
-        # mean: M_k = sum_i x_i q_ik
-        M_k = (d * qk[:,None]).sum(axis=0)
+        # data with errors?
+        d = data[neighborhood_k].reshape((log_p_k.size, gmm.D))
+        if T_inv_k is None:
+            # mean: M_k = sum_i x_i q_ik
+            M_k = (d * qk[:,None]).sum(axis=0)
 
-        # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
-        d_m = d - gmm.mean[k]
-        # funny way of saying: for each point i, do the outer product
-        # of d_m with its transpose, multiply with pi[i], and sum over i
-        C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+            # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
+            d_m = d - gmm.mean[k]
+            # funny way of saying: for each point i, do the outer product
+            # of d_m with its transpose, multiply with pi[i], and sum over i
+            C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+        else:
+            # need temporary variables:
+            # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
+            # B_ik = C_k - C_k T_ik^-1 C_k
+            # to replace pure data-driven means and covariances
+            d_m = d - gmm.mean[k]
+            b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
+            M_k = (b_k * qk[:,None]).sum(axis=0)
+
+            b_k -= gmm.mean[k]
+            B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
+            C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
+        return A_k, M_k, C_k
     else:
-        # need temporary variables:
-        # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
-        # B_ik = C_k - C_k T_ik^-1 C_k
-        # to replace pure data-driven means and covariances
-        d_m = d - gmm.mean[k]
-        b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
-        M_k = (b_k * qk[:,None]).sum(axis=0)
-
-        b_k -= gmm.mean[k]
-        B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
-        C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
-    return A_k, M_k, C_k
+        return 0,0,0
 
 def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=None, pool=None, chunksize=1, rng=np.random):
     # create fake data with same mechanism as the original data,
@@ -528,17 +531,17 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
 
         log_S2[N2_] = np.log(log_S2[N2_])
         if VERBOSITY >= 3 and N2 > N2_.sum():
-            print "Imputation sample lost points: %d -> %d", (N2, N2_.sum())
+            print "Imputation sample lost points: %d -> %d" % (N2, N2_.sum())
         N2 = N2_.sum()
 
         k = 0
-        for A2[k], M2[k], C2[k] in \
+        for A2[k], M2[k,:], C2[k,:,:] in \
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
             k += 1
 
     return A2, M2, C2, N2
 
-def _I(gmm, size, sel_callback, cutoff=5, covar=None, neighborhood=None, covar_reduce_fct=np.mean, rng=np.random):
+def _I(gmm, size, sel_callback, cutoff=3, covar=None, neighborhood=None, covar_reduce_fct=np.mean, rng=np.random):
 
     data2 = np.empty((size, gmm.D))
     if covar is None:
@@ -572,7 +575,7 @@ def _I(gmm, size, sel_callback, cutoff=5, covar=None, neighborhood=None, covar_r
         component2[lower:upper] = k
         lower = upper
 
-    # FIXME: may want to decide whether to add noise  before selector of after
+    # TODO: may want to decide whether to add noise before selector of after
     sel2 = ~sel_callback(data2, gmm=gmm)
     data2 = data2[sel2]
     component2 = component2[sel2]
