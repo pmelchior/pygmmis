@@ -208,7 +208,9 @@ class GMM(object):
 ############################
 # Begin of fit functions
 ############################
+
 VERBOSITY = False
+VERB_BUFFER = ""
 
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if k is None:
@@ -301,6 +303,13 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # begin EM
     it = 0
     maxiter = max(100, gmm.K)
+    if VERBOSITY:
+        global VERB_BUFFER
+        if sel_callback is None:
+            print "ITER\tPOINTS\tLOG_L\tN_STABLE"
+        else:
+            print "ITER\tPOINTS\tLOG_L\tN_IN\tN_STABLE"
+
     while it < maxiter: # limit loop in case of slow convergence
 
         # compute p(i | k) for each k independently in the pool
@@ -320,8 +329,6 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         if VERBOSITY:
             print ("%d\t%d\t%.3f" % (it, N, log_L_)),
-            if sel_callback is None:
-                print ""
 
         if sel_callback is not None:
             # with imputation the observed data logL can decrease.
@@ -338,8 +345,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
             log_L = log_L_
-            if VERBOSITY >= 2:
-                print "mean likelihood converged within tolerance %r: stopping here." % tol
+            if VERBOSITY:
+                print "\nmean likelihood converged within tolerance %r: stopping here." % tol
             break
 
         # update all important _ quantities for convergence test(s)
@@ -354,9 +361,17 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         for c in changed:
             neighborhood[c] = None
             V[c] = V_[c]
+        if VERBOSITY:
+            print "\t%d" % (gmm.K - changed.sum()),
         if VERBOSITY >= 2 and changed.any():
-            print "resetting neighborhoods due to volume change: ",
-            print ("(" + "%d," * len(changed) + ")") % tuple(changed)
+            VERB_BUFFER += "\nresetting neighborhoods due to volume change: "
+            VERB_BUFFER += ("(" + "%d," * len(changed) + ")") % tuple(changed)
+
+        if VERBOSITY:
+            print VERB_BUFFER
+            if len(VERB_BUFFER):
+                VERB_BUFFER = ""
+
         log_S[:] = 0
         N_[:] = 0
         it += 1
@@ -432,10 +447,11 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=
 
         if VERBOSITY:
             sel_outside = A2 > tol * A
-            print sel_outside.sum()
-            if VERBOSITY >= 3 and sel_outside.any():
-                print "component inside fractions: ",
-                print ("%.2f," * gmm.K) % tuple(A/(A+A2))
+            print "\t%d" % (gmm.K - sel_outside.sum()),
+            if VERBOSITY >= 2 and sel_outside.any():
+                global VERB_BUFFER
+                VERB_BUFFER += "\ncomponent inside fractions: "
+                VERB_BUFFER += ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2))
     else:
         A2 = M2 = C2 = N2 = 0
 
@@ -530,8 +546,8 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
             k += 1
 
         log_S2[N2_] = np.log(log_S2[N2_])
-        if VERBOSITY >= 3 and N2 > N2_.sum():
-            print "Imputation sample lost points: %d -> %d" % (N2, N2_.sum())
+        if VERBOSITY >= 2 and N2 > N2_.sum():
+            print "imputation sample lost points: %d -> %d" % (N2, N2_.sum())
         N2 = N2_.sum()
 
         k = 0
