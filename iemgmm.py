@@ -286,9 +286,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
-    S = np.zeros(len(data)) # S = sum_k p(x|k)
-    log_S = np.empty(len(data))
-    N = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
+    log_S = np.zeros(len(data)) # S = sum_k p(x|k)
+    N_ = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
     try:
         neighborhood
     except NameError:
@@ -310,17 +309,17 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         k = 0
         for log_p[k], neighborhood[k], T_inv[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
-            S[neighborhood[k]] += np.exp(log_p[k])
-            N[neighborhood[k]] = 1
+            log_S[neighborhood[k]] += np.exp(log_p[k]) # actually S, not logS
+            N_[neighborhood[k]] = 1
             k += 1
 
-        # since log(0) isn't a good idea, need to restrict to N
-        log_S[N] = np.log(S[N])
-        log_L_ = log_S[N].mean()
-        N_ = N.sum()
+        # need log(S), but since log(0) isn't a good idea, need to restrict to N_
+        log_S[N_] = np.log(log_S[N_])
+        log_L_ = log_S[N_].mean()
+        N = N_.sum()
 
         if VERBOSITY:
-            print ("%d\t%d\t%.3f" % (it, N_, log_L_)),
+            print ("%d\t%d\t%.3f" % (it, N, log_L_)),
             if sel_callback is None:
                 print ""
 
@@ -334,7 +333,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 break
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -358,8 +357,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         if VERBOSITY >= 2 and changed.any():
             print "resetting neighborhoods due to volume change: ",
             print ("(" + "%d," * len(changed) + ")") % tuple(changed)
-        S[:] = 0
-        N[:] = 0
+        log_S[:] = 0
+        N_[:] = 0
         it += 1
 
     pool.close()
@@ -407,13 +406,12 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
 
 
-def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
+def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)
     M = np.empty((gmm.K, gmm.D))
     C = np.empty((gmm.K, gmm.D, gmm.D))
-    N = len(data)
 
     # perform sums for M step in the pool
     import parmap
@@ -512,7 +510,8 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         # similar setup as above, but since imputated points
         # are drawn from the model, we can avoid the caution of
         # dealing with outliers: all points will be considered
-        S2 = np.zeros(len(data2))
+        log_S2 = np.zeros(len(data2))
+        N2_ = np.zeros(len(data2), dtype='bool')
         log_p2 = [[] for k in xrange(gmm.K)]
         T2_inv = [None for k in xrange(gmm.K)]
 
@@ -523,12 +522,14 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         k = 0
         for log_p2[k], neighborhood2[k], T2_inv[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
-            S2[neighborhood2[k]] += np.exp(log_p2[k])
+            log_S2[neighborhood2[k]] += np.exp(log_p2[k])
+            N2_[neighborhood2[k]] = 1
             k += 1
 
-        # don't have to worry about outliers from the model
-        log_S2 = np.log(S2)
-        N2 = len(data2)
+        log_S2[N2_] = np.log(log_S2[N2_])
+        if VERBOSITY >= 3 and N2 > N2_.sum():
+            print "Imputation sample lost points: %d -> %d", (N2, N2_.sum())
+        N2 = N2_.sum()
 
         k = 0
         for A2[k], M2[k], C2[k] in \
