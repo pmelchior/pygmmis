@@ -267,7 +267,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random, return_neighborhoods=False):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random):
 
     # init components
     init_callback(gmm, data=data, covar=covar, rng=rng)
@@ -333,6 +333,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
+            log_L = log_L_
             if VERBOSITY >= 2:
                 print "mean likelihood converged within tolerance %r: stopping here." % tol
             break
@@ -357,9 +358,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         it += 1
 
     pool.close()
-    if return_neighborhoods:
-        return gmm, neighborhood
-    return gmm
+    return log_L, neighborhood
+
 
 def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None):
     # p(x | k) for all x in the vicinity of k
@@ -416,10 +416,10 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
         k += 1
 
     if sel_callback is not None:
-        over = 100
+        over = 1
         tol = 1e-2
         size = N*over
-        A2, M2, C2, N2, log_L2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
         A2 /= over
         M2 /= over
         C2 /= over
@@ -427,7 +427,7 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=None, w=0, cutoff=Non
 
         if VERBOSITY:
             sel_outside = A2 > tol * A
-            print "\t%.3f\t%d" % (log_L2, sel_outside.sum())
+            print sel_outside.sum()
             if VERBOSITY >= 3 and sel_outside.any():
                 print "component inside fractions: ",
                 print ("%.2f," * gmm.K) % tuple(A/(A+A2))
@@ -500,7 +500,6 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
     M2 = np.zeros((gmm.K, gmm.D))
     C2 = np.zeros((gmm.K, gmm.D, gmm.D))
     N2 = len(data2)
-    log_L2 = 0
 
     if N2:
         # similar setup as above, but since imputated points
@@ -524,14 +523,13 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         # don't have to worry about outliers from the model
         log_S2 = np.log(S2)
         N2 = len(data2)
-        log_L2 = log_S2.mean()
 
         k = 0
         for A2[k], M2[k], C2[k] in \
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
             k += 1
 
-    return A2, M2, C2, N2, log_L2
+    return A2, M2, C2, N2
 
 def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.mean, rng=np.random):
 
