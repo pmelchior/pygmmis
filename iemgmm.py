@@ -385,6 +385,9 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None
     # changes to neighborhood will be minimal
     if cutoff is not None:
         indices = chi2 < cutoff*cutoff*gmm.D
+        if not indices.any():
+            np.savez("empty_comp.npz", k=k, amp=gmm.amp[k], mean=gmm.mean[k], covar=gmm.covar[k], cutoff=cutoff, neighborhood=neighborhood_k)
+            raise SystemExit
         chi2 = chi2[indices]
         if covar is not None and covar.shape != (gmm.D, gmm.D):
             T_inv_k = T_inv_k[indices]
@@ -533,48 +536,31 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
 
 def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.mean, rng=np.random):
 
+    data2 = np.empty((size, gmm.D))
     if covar is None:
-        data2 = gmm.draw(size, rng=rng)
-        covar2 = covar
+        covar2 = None
     else:
         if covar.shape == (gmm.D, gmm.D): # one-for-all
-            convolved = GMM(K=gmm.K, D=gmm.D)
-            convolved.amp[:] = gmm.amp[:]
-            convolved.mean[:,:] = gmm.mean[:]
-            convolved.covar[:,:,:] = gmm.covar[:,:,:] + covar
-            data2 = convolved.draw(size, rng=rng)
             covar2 = covar
         else:
-            # draw indices for components given amplitudes
-            data2 = np.empty((size, gmm.D))
             covar2 = np.empty((size, gmm.D, gmm.D))
 
-            # use reduce function on data covariance associated with
-            # each component
-            if covar_reduce_fct is not None:
-                ind = rng.choice(gmm.K, size=size, p=gmm.amp)
-                counter = 0
-                for k in xrange(gmm.K):
-                    points = ind == k
-                    N_k = points.sum()
-                    if N_k:
-                        covar_k = covar_reduce_fct(covar[neighborhood[k]], axis=0)
-                        covar2[counter:counter+N_k,:,:] = covar_k
-                        data2[counter:counter+N_k,:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N_k)
-                        counter += N_k
-
-            # every datum get an independent draw from available covars:
-            # really slow!
+    # draw indices for components given amplitudes
+    ind = rng.choice(gmm.K, size=size, p=gmm.amp)
+    N2 = np.bincount(ind, minlength=gmm.K)
+    # for each component: draw as many points as in ind from a normal
+    counter = 0
+    for k in np.flatnonzero(N2):
+        if covar is None:
+            data2[counter:counter + N2[k],:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
+        else:
+            if covar.shape == (gmm.D, gmm.D): # one-for-all
+                covar_k = covar
             else:
-                for i in xrange(size):
-                    comp = rng.choice(gmm.K, size=1, p=gmm.amp)[0]
-                    # random point in neighborhood of comp to get covar from
-                    if neighborhood[comp] is None:
-                        point = rng.randint(0, len(covar))
-                    else:
-                        point = neighborhood[comp][rng.randint(0, len(neighborhood[comp]))]
-                    covar2[i] = covar[point]
-                    data2[i] = rng.multivariate_normal(gmm.mean[comp], gmm.covar[comp] + covar2[i], size=1)
+                covar_k = covar_reduce_fct(covar[neighborhood[k]], axis=0)
+                covar2[counter:counter + N2[k],:,:] = covar_k
+            data2[counter:counter + N2[k],:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N2[k])
+        counter += N2[k]
 
     # FIXME: may want to decide whether to add noise  before selector of after
     sel2 = ~sel_callback(data2, gmm=gmm)
