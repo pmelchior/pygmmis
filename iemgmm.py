@@ -200,6 +200,11 @@ class GMM(object):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
+    def overlappingWith(self, k, cutoff=5):
+        chi2_k = self.logL_k(k, self.mean[k] - self.mean, covar=self.covar, chi2_only=True)
+        return np.flatnonzero(chi2_k < cutoff*cutoff*self.D)
+
+
 ############################
 # Begin of fit functions
 ############################
@@ -304,7 +309,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
         for log_p[k], neighborhood[k], T_inv[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, init_callback, pool=pool, chunksize=chunksize):
+        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             S[neighborhood[k]] += np.exp(log_p[k])
             N[neighborhood[k]] = 1
             k += 1
@@ -329,7 +334,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 break
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=covar, w=w, sel_callback=sel_callback, pool=pool, chunksize=chunksize, rng=rng)
+        _M(gmm, neighborhood, log_p, T_inv, log_S, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -360,8 +365,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     pool.close()
     return log_L, neighborhood
 
-
-def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None, init_callback=None):
+def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
     if cutoff is None or neighborhood_k is None:
@@ -497,7 +501,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
 def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=None, pool=None, chunksize=1, rng=np.random):
     # create fake data with same mechanism as the original data,
     # but invert selection to get the missing part
-    data2, covar2 = _I(gmm, size, sel_callback, neighborhood, covar=covar, rng=rng)
+    data2, covar2, neighborhood2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, neighborhood=neighborhood, rng=rng)
 
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
@@ -509,7 +513,6 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         # are drawn from the model, we can avoid the caution of
         # dealing with outliers: all points will be considered
         S2 = np.zeros(len(data2))
-        neighborhood2 = [None for k in xrange(gmm.K)]
         log_p2 = [[] for k in xrange(gmm.K)]
         T2_inv = [None for k in xrange(gmm.K)]
 
@@ -519,7 +522,7 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         import parmap
         k = 0
         for log_p2[k], neighborhood2[k], T2_inv[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood2), gmm, data2, covar2, cutoff, pool=pool, chunksize=chunksize):
+        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
             S2[neighborhood2[k]] += np.exp(log_p2[k])
             k += 1
 
@@ -534,7 +537,7 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
 
     return A2, M2, C2, N2
 
-def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.mean, rng=np.random):
+def _I(gmm, size, sel_callback, cutoff=5, covar=None, neighborhood=None, covar_reduce_fct=np.mean, rng=np.random):
 
     data2 = np.empty((size, gmm.D))
     if covar is None:
@@ -548,24 +551,40 @@ def _I(gmm, size, sel_callback, neighborhood, covar=None, covar_reduce_fct=np.me
     # draw indices for components given amplitudes
     ind = rng.choice(gmm.K, size=size, p=gmm.amp)
     N2 = np.bincount(ind, minlength=gmm.K)
+
+    # keep track which point comes from which component
+    component2 = np.empty(size, dtype='uint32')
+
     # for each component: draw as many points as in ind from a normal
-    counter = 0
+    lower = 0
     for k in np.flatnonzero(N2):
+        upper = lower + N2[k]
         if covar is None:
-            data2[counter:counter + N2[k],:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
+            data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
         else:
             if covar.shape == (gmm.D, gmm.D): # one-for-all
                 covar_k = covar
             else:
                 covar_k = covar_reduce_fct(covar[neighborhood[k]], axis=0)
-                covar2[counter:counter + N2[k],:,:] = covar_k
-            data2[counter:counter + N2[k],:] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N2[k])
-        counter += N2[k]
+                covar2[lower:upper, :,:] = covar_k
+            data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N2[k])
+        component2[lower:upper] = k
+        lower = upper
 
     # FIXME: may want to decide whether to add noise  before selector of after
     sel2 = ~sel_callback(data2, gmm=gmm)
+    data2 = data2[sel2]
+    component2 = component2[sel2]
+    if covar is not None and covar.shape != (gmm.D, gmm.D):
+        covar2 = covar2[sel2]
 
-    if covar is None or covar.shape == (gmm.D, gmm.D):
-        return data2[sel2], covar2
-    else:
-        return data2[sel2], covar2[sel2]
+    # determine neighborhood between components
+    neighborhood2 = [None for k in xrange(gmm.K)]
+    for k in xrange(gmm.K):
+        overlap_k = gmm.overlappingWith(k, cutoff=cutoff)
+        mask2 = np.zeros(len(data2), dtype='bool')
+        for j in overlap_k:
+            mask2 |= (component2 == j)
+        neighborhood2[k] = np.flatnonzero(mask2)
+
+    return data2, covar2, neighborhood2
