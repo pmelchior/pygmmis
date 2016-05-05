@@ -253,7 +253,7 @@ if __name__ == '__main__':
     seed = 6141#np.random.randint(1, 10000)#None
     from numpy.random import RandomState
     rng = RandomState(seed)
-    iemgmm.VERBOSITY = 1
+    iemgmm.VERBOSITY = 2
     w = 0.1
     cutoff = 5
 

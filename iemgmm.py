@@ -362,8 +362,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
             neighborhood[c] = None
             V[c] = V_[c]
         if VERBOSITY:
-            print "\t%d" % (gmm.K - changed.sum()),
-        if VERBOSITY >= 2 and changed.any():
+            print "\t%d" % (gmm.K - changed.size),
+        if VERBOSITY >= 2 and changed.size:
             VERB_BUFFER += "\nresetting neighborhoods due to volume change: "
             VERB_BUFFER += ("(" + "%d," * len(changed) + ")") % tuple(changed)
 
