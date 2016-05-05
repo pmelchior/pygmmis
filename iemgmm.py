@@ -368,7 +368,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
-    if cutoff is None or neighborhood_k is None:
+    if neighborhood_k is None:
         dx = data - gmm.mean[k]
     else:
         dx = data[neighborhood_k] - gmm.mean[k]
