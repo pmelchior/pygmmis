@@ -290,12 +290,10 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # and not considered as belonging to any component
     log_S = np.zeros(len(data)) # S = sum_k p(x|k)
     N_ = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
-    try:
-        neighborhood
-    except NameError:
-        neighborhood = [None for k in xrange(gmm.K)]
+    neighborhood = [None for k in xrange(gmm.K)]
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
+    troubled = np.zeros(gmm.K, dtype='bool')
 
     # compute volumes as proxy for component change
     V = np.linalg.det(gmm.covar)
@@ -316,7 +314,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
-        for log_p[k], neighborhood[k], T_inv[k] in \
+        for log_p[k], neighborhood[k], T_inv[k], troubled[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             log_S[neighborhood[k]] += np.exp(log_p[k]) # actually S, not logS
             N_[neighborhood[k]] = 1
@@ -354,8 +352,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         if sel_callback is not None:
             gmm_ = gmm # backup if next step gets worse (note: not gmm = gmm_!)
 
-        # check new component volumes and reset sel when it grows by
-        # more then 25%
+        # check new component volumes and reset neighborhood when it grows by
+        # more than 25%
         V_ = np.linalg.det(gmm.covar)
         changed = np.flatnonzero((V_- V)/V > 0.25)
         for c in changed:
@@ -366,6 +364,17 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         if VERBOSITY >= 2 and changed.size:
             VERB_BUFFER += "\nresetting neighborhoods due to volume change: "
             VERB_BUFFER += ("(" + "%d," * len(changed) + ")") % tuple(changed)
+
+        if troubled.any():
+            # can init at random or reset them at center of own neighborhood
+            # for another try
+            tcs = np.flatnonzero(troubled)
+            for c in tcs:
+                gmm.mean[c] = np.mean(neighborhood[c], axis=0)
+            if VERBOSITY >= 2:
+                VERB_BUFFER += "\nresetting instable component center: "
+                VERB_BUFFER += ("(" + "%d," * len(tcs) + ")") % tuple(tcs)
+            troubled[tcs] = False
 
         if VERBOSITY:
             print VERB_BUFFER
@@ -401,24 +410,27 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
 
     # NOTE: close to convergence, we could stop applying the cutoff because
     # changes to neighborhood will be minimal
+    troubled = False
     if cutoff is not None:
         indices = chi2 < cutoff*cutoff*gmm.D
-        if not indices.any():
-            np.savez("empty_comp.npz", k=k, amp=gmm.amp[k], mean=gmm.mean[k], covar=gmm.covar[k], cutoff=cutoff, neighborhood=neighborhood_k)
-            raise SystemExit
-        chi2 = chi2[indices]
-        if covar is not None and covar.shape != (gmm.D, gmm.D):
-            T_inv_k = T_inv_k[indices]
-        if neighborhood_k is None:
-            neighborhood_k = np.flatnonzero(indices)
+        if indices.any():
+            chi2 = chi2[indices]
+            if covar is not None and covar.shape != (gmm.D, gmm.D):
+                T_inv_k = T_inv_k[indices]
+            if neighborhood_k is None:
+                neighborhood_k = np.flatnonzero(indices)
+            else:
+                neighborhood_k = neighborhood_k[indices]
         else:
-            neighborhood_k = neighborhood_k[indices]
+            # return values without cutoff selection
+            # but remember to reset component
+            troubled = True
 
     # prevent tiny negative determinants to mess up
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k, troubled
 
 
 def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
@@ -539,15 +551,13 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         # i.e. all sums have flat weights
         import parmap
         k = 0
-        for log_p2[k], neighborhood2[k], T2_inv[k] in \
+        for log_p2[k], neighborhood2[k], T2_inv[k], _ in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
             log_S2[neighborhood2[k]] += np.exp(log_p2[k])
             N2_[neighborhood2[k]] = 1
             k += 1
 
         log_S2[N2_] = np.log(log_S2[N2_])
-        if VERBOSITY >= 2 and N2 > N2_.sum():
-            print "imputation sample lost points: %d -> %d" % (N2, N2_.sum())
         N2 = N2_.sum()
 
         k = 0
