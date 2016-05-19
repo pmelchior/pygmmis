@@ -293,7 +293,7 @@ if __name__ == '__main__':
     K = 3
     R = 10
     gmm_ = pygmmi.GMM(K=K, D=D)
-    imp = pygmmi.GMM(K=K*R, D=D)
+    avg = pygmmi.GMM(K=K*R, D=D)
     l = np.empty(R)
 
     # 1) run without imputation, ignoring errors
@@ -302,25 +302,26 @@ if __name__ == '__main__':
     for r in xrange(R):
         pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        avg.amp[r*K:(r+1)*K] = gmm_.amp
+        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
+        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps)
+    plotResults(orig, data, avg, l, patch=ps)
+
     """
     # 2) run without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = pygmmi.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
+        pygmmi.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        avg.amp[r*K:(r+1)*K] = gmm_.amp
+        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
+        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps)
+    plotResults(orig, data, avg, l, patch=ps)
     """
     # 3) run with imputation, igoring errors
     # We need a better init function to allow the model to
@@ -332,26 +333,26 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        avg.amp[r*K:(r+1)*K] = gmm_.amp
+        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
+        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps)
+    plotResults(orig, data, avg, l, patch=ps)
 
     # 4) run with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        avg.amp[r*K:(r+1)*K] = gmm_.amp
+        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
+        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps)
-    #plotDifferences(orig, data, imp, R, l, patch=ps)
-    #plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
+    plotResults(orig, data, avg, l, patch=ps)
+    #plotDifferences(orig, data, avg, R, l, patch=ps)
+    #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
