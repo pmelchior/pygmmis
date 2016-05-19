@@ -1,6 +1,6 @@
 #!/bin/env python
 
-import iemgmm
+import pygmmi
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -80,7 +80,7 @@ def plotDifferences(orig, data, gmm, R, l, patch=None):
     p = np.empty((R,B,B))
     for r in xrange(R):
         comps = np.arange(r*K, (r+1)*K)
-        gmm_ = iemgmm.GMM(K=K, D=gmm.D)
+        gmm_ = pygmmi.GMM(K=K, D=gmm.D)
         gmm_.amp[:] = gmm.amp[comps]
         gmm_.amp /= gmm_.amp.sum()
         gmm_.mean[:,:] = gmm.mean[comps,:]
@@ -124,7 +124,7 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
     ax.plot(data[:,0], data[:,1], 'o', mfc='b', mec='None')
 
     # prediction
-    B = 40
+    B = 100
     x,y = np.meshgrid(np.linspace(-5,15,B), np.linspace(-5,15,B))
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
@@ -150,7 +150,7 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
     plt.tight_layout()
     plt.show()
 
-def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
+def getCoverage(gmm, coords, sel_callback=None, repeat=5, rotate=True):
     # create a new gmm with randomly drawn components at each point in coords:
     # estimate how this gmm can cover the volume spanned by coords
     if sel_callback is None:
@@ -163,7 +163,7 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=2, rotate=True):
             inv_sel = sel == False
             coverage[sel] += 1./repeat
 
-            gmm_ = iemgmm.GMM(K=gmm.K, D=gmm.D)
+            gmm_ = pygmmi.GMM(K=gmm.K, D=gmm.D)
             gmm_.amp = np.random.rand(K)
             gmm_.amp /= gmm_.amp.sum()
             gmm_.covar = gmm.covar
@@ -250,17 +250,17 @@ def getSelection(type="hole", rng=np.random):
 if __name__ == '__main__':
 
     # set up test
-    seed = 6141#np.random.randint(1, 10000)#None
+    seed = np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
-    iemgmm.VERBOSITY = 2
+    pygmmi.VERBOSITY = 1
     w = 0.1
     cutoff = 5
 
     # draw N points from 3-component GMM
     N = 400
     D = 2
-    gmm = iemgmm.GMM(K=3, D=2)
+    gmm = pygmmi.GMM(K=3, D=2)
     gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
     gmm.amp /= gmm.amp.sum()
     gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -283,7 +283,7 @@ if __name__ == '__main__':
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy, gmm)
-    data = iemgmm.createShared(noisy[sel])
+    data = pygmmi.createShared(noisy[sel])
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
@@ -292,15 +292,15 @@ if __name__ == '__main__':
     # repeated runs: store results and logL
     K = 3
     R = 10
-    gmm_ = iemgmm.GMM(K=K, D=D)
-    imp = iemgmm.GMM(K=K*R, D=D)
+    gmm_ = pygmmi.GMM(K=K, D=D)
+    imp = pygmmi.GMM(K=K*R, D=D)
     l = np.empty(R)
 
-    # 1) IEMGMM without imputation, ignoring errors
+    # 1) run without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        iemgmm.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -308,12 +308,12 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
-
-    # 2) IEMGMM without imputation, incorporating errors
+    """
+    # 2) run without imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
+        imp_ = pygmmi.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -321,19 +321,18 @@ if __name__ == '__main__':
     imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
-
-    # 3) IEMGMM with imputation, igoring errors
+    """
+    # 3) run with imputation, igoring errors
     # We need a better init function to allow the model to
     # start from a good initial location and to explore the
     # volume that is spanned by the missing part of the data
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(iemgmm.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
-
+    init_cb = partial(pygmmi.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
+        imp_ = pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -342,11 +341,11 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, imp, l, patch=ps)
 
-    # 4) IEMGMM with imputation, incorporating errors
+    # 4) run with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = iemgmm.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
+        imp_ = pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
