@@ -201,8 +201,11 @@ class GMM(object):
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
     def overlappingWith(self, k, cutoff=5):
-        chi2_k = self.logL_k(k, self.mean, covar=self.covar, chi2_only=True)
-        return np.flatnonzero(chi2_k < cutoff*cutoff*self.D)
+        if cutoff is not None:
+            chi2_k = self.logL_k(k, self.mean, covar=self.covar, chi2_only=True)
+            return np.flatnonzero(chi2_k < cutoff*cutoff*self.D)
+        else:
+            return np.ones(self.K, dtype='bool')
 
 
 ############################
