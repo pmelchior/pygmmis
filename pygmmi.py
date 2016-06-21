@@ -370,16 +370,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                     VERB_BUFFER += "\nresetting instable components: "
                     VERB_BUFFER += ("(" + "%d," * empty.sum() + ")") % tuple(np.flatnonzero(empty))
 
-            # check new component and reset neighborhood
-            # when largest eigenvalue grows by 25%
-            # avoids tiny fluctuations close to convergence
-            eigv_ = np.linalg.eigvalsh(gmm.covar)[:,-1]
-            increased = (eigv_ > eigv * 1.25)
-            eigv[:] = eigv_[:]
-            if VERBOSITY >= 2 and increased.any():
-                VERB_BUFFER += "\nresetting neighborhoods of growing components: "
-                VERB_BUFFER += ("(" + "%d," * increased.sum() + ")") % tuple(np.flatnonzero(increased))
-
+            # check if component has moved by more than sigma/2
             shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
             moved = shift2 > 0.5**2
 
@@ -387,8 +378,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 VERB_BUFFER += "\nresetting neighborhoods of moving components: "
                 VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
 
-            changed = np.flatnonzero(empty | increased | moved)
+            changed = np.flatnonzero(empty | moved)
             if changed.size:
+                eigv[changed] = np.linalg.eigvalsh(gmm.covar[changed])[:,-1]
                 neighborhood[changed] = tree.query_radius(gmm.mean[changed], r=cutoff*eigv[changed])
 
             if VERBOSITY:
