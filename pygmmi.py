@@ -281,6 +281,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
     # init components
     init_callback(gmm, data=data, covar=covar, rng=rng)
+    # save backup
+    import copy
+    gmm_ = copy.deepcopy(gmm)
 
     # set up pool
     import multiprocessing
@@ -293,13 +296,19 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # and not considered as belonging to any component
     log_S = np.zeros(len(data)) # S = sum_k p(x|k)
     N_ = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
-    neighborhood = [None for k in xrange(gmm.K)]
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
-    troubled = np.zeros(gmm.K, dtype='bool')
+    empty = np.zeros(gmm.K, dtype=bool)
 
-    # compute volumes as proxy for component change
-    V = np.linalg.det(gmm.covar)
+    # if cutoff is used: select all points within a sphere set by the
+    # largest eigenvalue of each component
+    if cutoff is not None:
+        from sklearn.neighbors import KDTree
+        tree = KDTree(data)
+        eigv = np.linalg.eigvalsh(gmm.covar)[:,-1]
+        neighborhood = tree.query_radius(gmm.mean, r=cutoff*eigv)
+    else:
+        neighborhood = [None for k in xrange(gmm.K)]
 
     # begin EM
     it = 0
@@ -317,7 +326,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
-        for log_p[k], neighborhood[k], T_inv[k], troubled[k] in \
+        for log_p[k], neighborhood[k], T_inv[k], empty[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             log_S[neighborhood[k]] += np.exp(log_p[k]) # actually S, not logS
             N_[neighborhood[k]] = 1
@@ -350,39 +359,53 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 print "\nmean likelihood converged within tolerance %r: stopping here." % tol
             break
 
-        # update all important _ quantities for convergence test(s)
-        log_L = log_L_
-        if sel_callback is not None:
-            gmm_ = gmm # backup if next step gets worse (note: not gmm = gmm_!)
+        # with a a cutoff: we may have to update the neighborhoods
+        if cutoff is not None:
+            if empty.any():
+                # can init at random or reset them at previous position,
+                # increase covar and neighborhood for another try
+                gmm.mean[empty] = gmm_.mean[empty]
+                gmm.covar[empty] = gmm_.covar[~empty].mean(axis=0)
+                if VERBOSITY >= 2:
+                    VERB_BUFFER += "\nresetting instable components: "
+                    VERB_BUFFER += ("(" + "%d," * empty.sum() + ")") % tuple(np.flatnonzero(empty))
 
-        # check new component volumes and reset neighborhood when it grows by
-        # more than 25%
-        V_ = np.linalg.det(gmm.covar)
-        changed = np.flatnonzero((V_- V)/V > 0.25)
-        for c in changed:
-            neighborhood[c] = None
-            V[c] = V_[c]
-        if VERBOSITY:
-            print "\t%d" % (gmm.K - changed.size),
-        if VERBOSITY >= 2 and changed.size:
-            VERB_BUFFER += "\nresetting neighborhoods due to volume change: "
-            VERB_BUFFER += ("(" + "%d," * len(changed) + ")") % tuple(changed)
+            # check new component and reset neighborhood
+            # when largest eigenvalue grows by 25%
+            # avoids tiny fluctuations close to convergence
+            eigv_ = np.linalg.eigvalsh(gmm.covar)[:,-1]
+            increased = (eigv_ > eigv * 1.25)
+            eigv[:] = eigv_[:]
+            if VERBOSITY >= 2 and increased.any():
+                VERB_BUFFER += "\nresetting neighborhoods of growing components: "
+                VERB_BUFFER += ("(" + "%d," * increased.sum() + ")") % tuple(np.flatnonzero(increased))
 
-        if troubled.any():
-            # can init at random or reset them at center of own neighborhood
-            # for another try
-            tcs = np.flatnonzero(troubled)
-            for c in tcs:
-                gmm.mean[c] = np.mean(neighborhood[c], axis=0)
-            if VERBOSITY >= 2:
-                VERB_BUFFER += "\nresetting instable component center: "
-                VERB_BUFFER += ("(" + "%d," * len(tcs) + ")") % tuple(tcs)
-            troubled[tcs] = False
+            shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
+            moved = shift2 > 0.5**2
+
+            if VERBOSITY >= 2 and moved.any():
+                VERB_BUFFER += "\nresetting neighborhoods of moving components: "
+                VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
+
+            changed = np.flatnonzero(empty | increased | moved)
+            if changed.size:
+                neighborhood[changed] = tree.query_radius(gmm.mean[changed], r=cutoff*eigv[changed])
+
+            if VERBOSITY:
+                print "\t%d" % (gmm.K - changed.size),
 
         if VERBOSITY:
             print VERB_BUFFER
             if len(VERB_BUFFER):
                 VERB_BUFFER = ""
+
+        # update all important _ quantities for convergence test(s)
+        log_L = log_L_
+        # backup to see if components move of if next step gets worse
+        # note: not gmm = gmm_!
+        gmm_.amp[:] = gmm.amp[:]
+        gmm_.mean[:,:] = gmm.mean[:,:]
+        gmm_.covar[:,:,:] = gmm.covar[:,:,:]
 
         log_S[:] = 0
         N_[:] = 0
@@ -413,10 +436,13 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
 
     # NOTE: close to convergence, we could stop applying the cutoff because
     # changes to neighborhood will be minimal
-    troubled = False
+    empty = False
     if cutoff is not None:
         indices = chi2 < cutoff*cutoff*gmm.D
         if indices.any():
+            # if all indices are used: probably time to increase neighborhood
+            if indices.all():
+                changed = 0
             chi2 = chi2[indices]
             if covar is not None and covar.shape != (gmm.D, gmm.D):
                 T_inv_k = T_inv_k[indices]
@@ -427,13 +453,13 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
         else:
             # return values without cutoff selection
             # but remember to reset component
-            troubled = True
+            empty = True
 
     # prevent tiny negative determinants to mess up
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k, troubled
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k, empty
 
 
 def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
