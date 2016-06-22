@@ -259,9 +259,9 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 # Run a simple GMM to initialize a tricky one:
-def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, covar_factor=1.):
+def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, covar_factor=1., tree=None):
     # 1) run GMM without error and selection (fit is essentially an init fct)
-    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng)
+    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, tree=tree, rng=rng)
     # 2) adjust the covariance to allow to provide more support
     # in missing volume
     gmm.covar[:,:,:] *= covar_factor
