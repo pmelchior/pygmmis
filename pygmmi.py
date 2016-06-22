@@ -277,7 +277,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, tree=None, rng=np.random):
 
     # init components
     init_callback(gmm, data=data, covar=covar, rng=rng)
@@ -302,9 +302,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
     # if cutoff is used: select all points within a sphere set by the
     # largest eigenvalue of each component
-    if cutoff is not None:
-        from sklearn.neighbors import KDTree
-        tree = KDTree(data)
+    if cutoff is not None and tree is not None:
         eigv = np.linalg.eigvalsh(gmm.covar)[:,-1]
         neighborhood = tree.query_radius(gmm.mean, r=cutoff*eigv)
     else:
@@ -380,8 +378,12 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
             changed = np.flatnonzero(empty | moved)
             if changed.size:
-                eigv[changed] = np.linalg.eigvalsh(gmm.covar[changed])[:,-1]
-                neighborhood[changed] = tree.query_radius(gmm.mean[changed], r=cutoff*eigv[changed])
+                if tree is not None:
+                    eigv[changed] = np.linalg.eigvalsh(gmm.covar[changed])[:,-1]
+                    neighborhood[changed] = tree.query_radius(gmm.mean[changed], r=cutoff*eigv[changed])
+                else:
+                    for c in changed:
+                        neighborhood[c] = None
 
             if VERBOSITY:
                 print "\t%d" % (gmm.K - changed.size),
