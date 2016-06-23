@@ -7,6 +7,7 @@ import matplotlib.patches as patches
 import matplotlib.lines as lines
 import datetime
 from functools import partial
+from sklearn.neighbors import KDTree
 
 def plotResults(orig, data, gmm, l, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -250,12 +251,12 @@ def getSelection(type="hole", rng=np.random):
 if __name__ == '__main__':
 
     # set up test
-    seed = np.random.randint(1, 10000)
+    seed = 8422#np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pygmmi.VERBOSITY = 1
+    pygmmi.VERBOSITY = 2
     w = 0.1
-    cutoff = 5
+    cutoff = 3
 
     # draw N points from 3-component GMM
     N = 400
@@ -285,6 +286,7 @@ if __name__ == '__main__':
     sel = cb(noisy, gmm)
     data = pygmmi.createShared(noisy[sel])
     covar = disp**2 * np.eye(D)
+    tree = KDTree(data, leaf_size=20)
 
     # plot data vs true model
     plotResults(orig, data, gmm, np.ones(1), patch=ps)
@@ -300,7 +302,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng, tree=tree)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -323,17 +325,18 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)
     """
+
     # 3) run with imputation, igoring errors
     # We need a better init function to allow the model to
     # start from a good initial location and to explore the
     # volume that is spanned by the missing part of the data
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(pygmmi.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
+    init_cb = partial(pygmmi.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., tree=tree)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng, tree=tree)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -346,7 +349,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng, tree=tree)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
