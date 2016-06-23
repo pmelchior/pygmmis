@@ -259,9 +259,9 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 # Run a simple GMM to initialize a tricky one:
-def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, covar_factor=1., tree=None):
+def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, covar_factor=1.):
     # 1) run GMM without error and selection (fit is essentially an init fct)
-    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, tree=tree, rng=rng)
+    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng)
     # 2) adjust the covariance to allow to provide more support
     # in missing volume
     gmm.covar[:,:,:] *= covar_factor
@@ -277,7 +277,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, tree=None, rng=np.random):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random):
 
     # init components
     init_callback(gmm, data=data, covar=covar, rng=rng)
@@ -299,14 +299,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
     empty = np.zeros(gmm.K, dtype=bool)
-
-    # if cutoff is used: select all points within a sphere set by the
-    # largest eigenvalue of each component
-    if cutoff is not None and tree is not None:
-        eigv = np.linalg.eigvalsh(gmm.covar)[:,-1]
-        neighborhood = tree.query_radius(gmm.mean, r=cutoff*eigv)
-    else:
-        neighborhood = [None for k in xrange(gmm.K)]
+    neighborhood = [None for k in xrange(gmm.K)]
 
     # begin EM
     it = 0
@@ -376,14 +369,10 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 VERB_BUFFER += "\nresetting neighborhoods of moving components: "
                 VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
 
+            # force update to neighborhood
             changed = np.flatnonzero(empty | moved)
-            if changed.size:
-                if tree is not None:
-                    eigv[changed] = np.linalg.eigvalsh(gmm.covar[changed])[:,-1]
-                    neighborhood[changed] = tree.query_radius(gmm.mean[changed], r=cutoff*eigv[changed])
-                else:
-                    for c in changed:
-                        neighborhood[c] = None
+            for c in changed:
+                neighborhood[c] = None
 
             if VERBOSITY:
                 print "\t%d" % (gmm.K - changed.size),

@@ -286,13 +286,6 @@ if __name__ == '__main__':
     data = pygmmi.createShared(noisy[sel])
     covar = disp**2 * np.eye(D)
 
-    # use tree to speed up neighborhood lookups
-    try:
-        from sklearn.neighbors import KDTree
-        tree = KDTree(data, leaf_size=20)
-    except ImportError:
-        tree = None
-
     # plot data vs true model
     plotResults(orig, data, gmm, np.ones(1), patch=ps)
 
@@ -307,7 +300,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng, tree=tree)
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -337,11 +330,11 @@ if __name__ == '__main__':
     # volume that is spanned by the missing part of the data
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(pygmmi.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., tree=tree)
+    init_cb = partial(pygmmi.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng, tree=tree)
+        pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -354,7 +347,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng, tree=tree)
+        pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
