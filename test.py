@@ -7,7 +7,6 @@ import matplotlib.patches as patches
 import matplotlib.lines as lines
 import datetime
 from functools import partial
-from sklearn.neighbors import KDTree
 
 def plotResults(orig, data, gmm, l, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -254,7 +253,7 @@ if __name__ == '__main__':
     seed = 8422#np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pygmmi.VERBOSITY = 2
+    pygmmi.VERBOSITY = 1
     w = 0.1
     cutoff = 3
 
@@ -286,7 +285,13 @@ if __name__ == '__main__':
     sel = cb(noisy, gmm)
     data = pygmmi.createShared(noisy[sel])
     covar = disp**2 * np.eye(D)
-    tree = KDTree(data, leaf_size=20)
+
+    # use tree to speed up neighborhood lookups
+    try:
+        from sklearn.neighbors import KDTree
+        tree = KDTree(data, leaf_size=20)
+    except ImportError:
+        tree = None
 
     # plot data vs true model
     plotResults(orig, data, gmm, np.ones(1), patch=ps)
