@@ -250,12 +250,12 @@ def getSelection(type="hole", rng=np.random):
 if __name__ == '__main__':
 
     # set up test
-    seed = 8422#np.random.randint(1, 10000)
+    seed = 3373 # 8422 # np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmi.VERBOSITY = 1
     w = 0.1
-    cutoff = 3
+    cutoff = 5
 
     # draw N points from 3-component GMM
     N = 400

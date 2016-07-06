@@ -421,7 +421,7 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     # changes to neighborhood will be minimal
     empty = False
     if cutoff is not None:
-        indices = chi2 < cutoff*cutoff*gmm.D
+        indices = chi2 < cutoff*cutoff
         if indices.any():
             # if all indices are used: probably time to increase neighborhood
             if indices.all():
