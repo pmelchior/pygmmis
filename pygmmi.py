@@ -96,16 +96,14 @@ class GMM(object):
         samples = np.empty((size, self.D))
         counter = 0
         if size > self.K:
-            bc = np.bincount(ind, minlength=size)
-            components = np.arange(ind.size)[bc > 0]
-            for c in components:
-                mask = ind == c
-                s = mask.sum()
-                samples[counter:counter+s] = rng.multivariate_normal(self.mean[c], self.covar[c], size=s)
+            N_k = np.bincount(ind, minlength=self.K)
+            for k in xrange(self.K):
+                s = N_k[k]
+                samples[counter:counter+s] = rng.multivariate_normal(self.mean[k], self.covar[k], size=s)
                 counter += s
         else:
-            for i in ind:
-                samples[counter] = rng.multivariate_normal(self.mean[i], self.covar[i], size=1)
+            for k in ind:
+                samples[counter] = rng.multivariate_normal(self.mean[k], self.covar[k], size=1)
                 counter += 1
 
         # if subsample with selection is required
