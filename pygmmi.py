@@ -203,7 +203,7 @@ class GMM(object):
     def overlappingWith(self, k, cutoff=5):
         if cutoff is not None:
             chi2_k = self.logL_k(k, self.mean, covar=self.covar, chi2_only=True)
-            return np.flatnonzero(chi2_k < cutoff*cutoff*self.D)
+            return np.flatnonzero(chi2_k < cutoff*cutoff)
         else:
             return np.ones(self.K, dtype='bool')
 
@@ -299,7 +299,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
     empty = np.zeros(gmm.K, dtype=bool)
-    neighborhood = [None for k in xrange(gmm.K)]
+    nbh = [None for k in xrange(gmm.K)]
 
     # begin EM
     it = 0
@@ -317,10 +317,10 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
-        for log_p[k], neighborhood[k], T_inv[k], empty[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
-            log_S[neighborhood[k]] += np.exp(log_p[k]) # actually S, not logS
-            N_[neighborhood[k]] = 1
+        for log_p[k], nbh[k], T_inv[k], empty[k] in \
+        parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+            log_S[nbh[k]] += np.exp(log_p[k]) # actually S, not logS
+            N_[nbh[k]] = 1
             k += 1
 
         # need log(S), but since log(0) isn't a good idea, need to restrict to N_
@@ -341,7 +341,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 break
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -350,11 +350,11 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 print "\nmean likelihood converged within tolerance %r: stopping here." % tol
             break
 
-        # with a a cutoff: we may have to update the neighborhoods
+        # with a a cutoff: we may have to update the nbhs
         if cutoff is not None:
             if empty.any():
                 # can init at random or reset them at previous position,
-                # increase covar and neighborhood for another try
+                # increase covar and nbh for another try
                 gmm.mean[empty] = gmm_.mean[empty]
                 gmm.covar[empty] = gmm_.covar[~empty].mean(axis=0)
                 if VERBOSITY >= 2:
@@ -366,13 +366,13 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
             moved = shift2 > 0.5**2
 
             if VERBOSITY >= 2 and moved.any():
-                VERB_BUFFER += "\nresetting neighborhoods of moving components: "
+                VERB_BUFFER += "\nresetting nbhs of moving components: "
                 VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
 
-            # force update to neighborhood
+            # force update to nbh
             changed = np.flatnonzero(empty | moved)
             for c in changed:
-                neighborhood[c] = None
+                nbh[c] = None
 
             if VERBOSITY:
                 print "\t%d" % (gmm.K - changed.size),
@@ -395,15 +395,15 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         it += 1
 
     pool.close()
-    return log_L, neighborhood
+    return log_L, nbh
 
-def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
+def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
-    if neighborhood_k is None:
+    if nbh_k is None:
         dx = data - gmm.mean[k]
     else:
-        dx = data[neighborhood_k] - gmm.mean[k]
+        dx = data[nbh_k] - gmm.mean[k]
 
     if covar is None:
          T_inv_k = None
@@ -414,25 +414,25 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
         if covar.shape == (gmm.D, gmm.D): # one-for-all
             T_inv_k = np.linalg.inv(gmm.covar[k] + covar)
         else: # each datum has covariance
-            T_inv_k = np.linalg.inv(gmm.covar[k] + covar[neighborhood_k].reshape(len(dx), gmm.D, gmm.D))
+            T_inv_k = np.linalg.inv(gmm.covar[k] + covar[nbh_k].reshape(len(dx), gmm.D, gmm.D))
         chi2 = np.einsum('...i,...ij,...j', dx, T_inv_k, dx)
 
     # NOTE: close to convergence, we could stop applying the cutoff because
-    # changes to neighborhood will be minimal
+    # changes to nbh will be minimal
     empty = False
     if cutoff is not None:
         indices = chi2 < cutoff*cutoff
         if indices.any():
-            # if all indices are used: probably time to increase neighborhood
+            # if all indices are used: probably time to increase nbh
             if indices.all():
                 changed = 0
             chi2 = chi2[indices]
             if covar is not None and covar.shape != (gmm.D, gmm.D):
                 T_inv_k = T_inv_k[indices]
-            if neighborhood_k is None:
-                neighborhood_k = np.flatnonzero(indices)
+            if nbh_k is None:
+                nbh_k = np.flatnonzero(indices)
             else:
-                neighborhood_k = neighborhood_k[indices]
+                nbh_k = nbh_k[indices]
         else:
             # return values without cutoff selection
             # but remember to reset component
@@ -442,10 +442,10 @@ def _E(k, neighborhood_k, gmm, data, covar=None, cutoff=None):
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, neighborhood_k, T_inv_k, empty
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, nbh_k, T_inv_k, empty
 
 
-def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
+def _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)
@@ -456,14 +456,14 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=
     import parmap
     k = 0
     for A[k], M[k,:], C[k,:,:] in \
-    parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
+    parmap.starmap(_computeMSums, zip(xrange(gmm.K), nbh, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
 
     if sel_callback is not None:
         over = 1
         tol = 1e-2
         size = N*over
-        A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, neighborhood, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, nbh, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
         A2 /= over
         M2 /= over
         C2 /= over
@@ -498,13 +498,13 @@ def _M(gmm, neighborhood, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=
         gmm.covar[:,:,:] = (C + C2) / (A + A2)[:,None,None]
 
 
-def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
+def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
     if log_p_k.size:
         # form log_q_ik by dividing with S = sum_k p_ik
         # NOTE:  this modifies log_p_k in place!
-        # NOTE2: reshape needed when neighborhood_k is None because of its
+        # NOTE2: reshape needed when nbh_k is None because of its
         # implicit meaning as np.newaxis (which would create a 2D array)
-        log_p_k -= log_S[neighborhood_k].reshape(log_p_k.size)
+        log_p_k -= log_S[nbh_k].reshape(log_p_k.size)
 
         # amplitude: A_k = sum_i q_ik
         A_k = np.exp(logsum(log_p_k))
@@ -513,7 +513,7 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
         qk = np.exp(log_p_k)
 
         # data with errors?
-        d = data[neighborhood_k].reshape((log_p_k.size, gmm.D))
+        d = data[nbh_k].reshape((log_p_k.size, gmm.D))
         if T_inv_k is None:
             # mean: M_k = sum_i x_i q_ik
             M_k = (d * qk[:,None]).sum(axis=0)
@@ -539,10 +539,10 @@ def _computeMSums(k, neighborhood_k, log_p_k, T_inv_k, gmm, data, log_S):
     else:
         return 0,0,0
 
-def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=None, pool=None, chunksize=1, rng=np.random):
+def _computeIMSums(gmm, size, sel_callback, nbh, covar=None, cutoff=None, pool=None, chunksize=1, rng=np.random):
     # create fake data with same mechanism as the original data,
     # but invert selection to get the missing part
-    data2, covar2, neighborhood2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, neighborhood=neighborhood, rng=rng)
+    data2, covar2, nbh2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, nbh=nbh, rng=rng)
 
     A2 = np.zeros(gmm.K)
     M2 = np.zeros((gmm.K, gmm.D))
@@ -563,10 +563,10 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
         # i.e. all sums have flat weights
         import parmap
         k = 0
-        for log_p2[k], neighborhood2[k], T2_inv[k], _ in \
-        parmap.starmap(_E, zip(xrange(gmm.K), neighborhood2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
-            log_S2[neighborhood2[k]] += np.exp(log_p2[k])
-            N2_[neighborhood2[k]] = 1
+        for log_p2[k], nbh2[k], T2_inv[k], _ in \
+        parmap.starmap(_E, zip(xrange(gmm.K), nbh2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
+            log_S2[nbh2[k]] += np.exp(log_p2[k])
+            N2_[nbh2[k]] = 1
             k += 1
 
         log_S2[N2_] = np.log(log_S2[N2_])
@@ -574,12 +574,12 @@ def _computeIMSums(gmm, size, sel_callback, neighborhood, covar=None, cutoff=Non
 
         k = 0
         for A2[k], M2[k,:], C2[k,:,:] in \
-        parmap.starmap(_computeMSums, zip(xrange(gmm.K), neighborhood2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
+        parmap.starmap(_computeMSums, zip(xrange(gmm.K), nbh2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
             k += 1
 
     return A2, M2, C2, N2
 
-def _I(gmm, size, sel_callback, cutoff=3, covar=None, neighborhood=None, covar_reduce_fct=np.mean, rng=np.random):
+def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct=np.mean, rng=np.random):
 
     data2 = np.empty((size, gmm.D))
     if covar is None:
@@ -604,29 +604,34 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, neighborhood=None, covar_r
         if covar is None:
             data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
         else:
+            # determine covar2 from given input covariances
             if covar.shape == (gmm.D, gmm.D): # one-for-all
-                covar_k = covar
+                error_k = covar
             else:
-                covar_k = covar_reduce_fct(covar[neighborhood[k]], axis=0)
-                covar2[lower:upper, :,:] = covar_k
-            data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + covar_k, size=N2[k])
+                error_k = covar_reduce_fct(covar[nbh[k]], axis=0)
+                covar2[lower:upper, :,:] = error_k
+            data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + error_k, size=N2[k])
         component2[lower:upper] = k
         lower = upper
 
-    # TODO: may want to decide whether to add noise before selector of after
+    # TODO: may want to decide whether to add noise before selection or after
+    # Here we do noise, then selection, but this is not fundamental
     sel2 = ~sel_callback(data2, gmm=gmm)
     data2 = data2[sel2]
     component2 = component2[sel2]
     if covar is not None and covar.shape != (gmm.D, gmm.D):
         covar2 = covar2[sel2]
 
-    # determine neighborhood between components
-    neighborhood2 = [None for k in xrange(gmm.K)]
+    # determine nbh of each component:
+    # since components may overlap, simply using component2 is insufficient.
+    # for the sake of speed, we simply add all points whose components overlap
+    # with the one in question
+    nbh2 = [None for k in xrange(gmm.K)]
     for k in xrange(gmm.K):
         overlap_k = gmm.overlappingWith(k, cutoff=cutoff)
         mask2 = np.zeros(len(data2), dtype='bool')
         for j in overlap_k:
             mask2 |= (component2 == j)
-        neighborhood2[k] = np.flatnonzero(mask2)
+        nbh2[k] = np.flatnonzero(mask2)
 
-    return data2, covar2, neighborhood2
+    return data2, covar2, nbh2
