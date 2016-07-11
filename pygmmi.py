@@ -292,6 +292,17 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     empty = np.zeros(gmm.K, dtype=bool)
     nbh = [None for k in xrange(gmm.K)]
 
+    # compute effective cutoff for chi2 in D dimensions
+    if cutoff is not None:
+        # note: subsequently the cutoff parameter, e.g. in _E(), refers to this:
+        # chi2 < cutoff,
+        # while in fit() it means e.g. "cut at 3 sigma".
+        # These differing conventions need to be documented well.
+        import scipy.stats
+        cdf_1d = scipy.stats.norm.cdf(cutoff)
+        confidence_1d = 1-(1-cdf_1d)*2
+        cutoff_nd = scipy.stats.chi2.ppf(confidence_1d, gmm.D)
+
     # begin EM
     it = 0
     maxiter = max(100, gmm.K)
@@ -309,7 +320,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # also N = {i | i in neighborhood[k]} for any k
         k = 0
         for log_p[k], nbh[k], T_inv[k], empty[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+        parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff_nd, pool=pool, chunksize=chunksize):
             log_S[nbh[k]] += np.exp(log_p[k]) # actually S, not logS
             N_[nbh[k]] = 1
             k += 1
@@ -332,7 +343,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 break
 
         # perform M step with M-sums of data and imputations runs
-        _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
+        _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff_nd, pool=pool, chunksize=chunksize, rng=rng)
 
         # convergence test:
         if it > 0 and log_L_ - log_L < tol:
@@ -412,7 +423,7 @@ def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
     # changes to nbh will be minimal
     empty = False
     if cutoff is not None:
-        indices = chi2 < cutoff*cutoff
+        indices = chi2 < cutoff
         if indices.any():
             # if all indices are used: probably time to increase nbh
             if indices.all():
@@ -573,7 +584,7 @@ def _computeIMSums(gmm, size, sel_callback, nbh, covar=None, cutoff=None, pool=N
 def _overlappingWith(k, gmm, cutoff=5):
     if cutoff is not None:
         chi2_k = gmm.logL_k(k, gmm.mean, covar=gmm.covar, chi2_only=True)
-        return np.flatnonzero(chi2_k < cutoff*cutoff)
+        return np.flatnonzero(chi2_k < cutoff)
     else:
         return np.ones(gmm.K, dtype='bool')
 
