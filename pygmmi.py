@@ -198,13 +198,6 @@ class GMM(object):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
-    def overlappingWith(self, k, cutoff=5):
-        if cutoff is not None:
-            chi2_k = self.logL_k(k, self.mean, covar=self.covar, chi2_only=True)
-            return np.flatnonzero(chi2_k < cutoff*cutoff)
-        else:
-            return np.ones(self.K, dtype='bool')
-
 
 ############################
 # Begin of fit functions
@@ -577,6 +570,13 @@ def _computeIMSums(gmm, size, sel_callback, nbh, covar=None, cutoff=None, pool=N
 
     return A2, M2, C2, N2
 
+def _overlappingWith(k, gmm, cutoff=5):
+    if cutoff is not None:
+        chi2_k = gmm.logL_k(k, gmm.mean, covar=gmm.covar, chi2_only=True)
+        return np.flatnonzero(chi2_k < cutoff*cutoff)
+    else:
+        return np.ones(gmm.K, dtype='bool')
+
 def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct=np.mean, rng=np.random):
 
     data2 = np.empty((size, gmm.D))
@@ -626,7 +626,7 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct
     # with the one in question
     nbh2 = [None for k in xrange(gmm.K)]
     for k in xrange(gmm.K):
-        overlap_k = gmm.overlappingWith(k, cutoff=cutoff)
+        overlap_k = _overlappingWith(k, gmm, cutoff=cutoff)
         mask2 = np.zeros(len(data2), dtype='bool')
         for j in overlap_k:
             mask2 |= (component2 == j)
