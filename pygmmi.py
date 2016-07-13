@@ -512,19 +512,19 @@ def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
         A_k = np.exp(logsum(log_p_k))
 
         # in fact: q_ik, but we treat sample index i silently everywhere
-        qk = np.exp(log_p_k)
+        q_k = np.exp(log_p_k)
 
         # data with errors?
         d = data[nbh_k].reshape((log_p_k.size, gmm.D))
         if T_inv_k is None:
             # mean: M_k = sum_i x_i q_ik
-            M_k = (d * qk[:,None]).sum(axis=0)
+            M_k = (d * q_k[:,None]).sum(axis=0)
 
             # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
             d_m = d - gmm.mean[k]
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
-            C_k = (qk[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+            C_k = (q_k[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
         else:
             # need temporary variables:
             # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
@@ -532,11 +532,11 @@ def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
             # to replace pure data-driven means and covariances
             d_m = d - gmm.mean[k]
             b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
-            M_k = (b_k * qk[:,None]).sum(axis=0)
+            M_k = (b_k * q_k[:,None]).sum(axis=0)
 
             b_k -= gmm.mean[k]
             B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
-            C_k = (qk[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
+            C_k = (q_k[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
         return A_k, M_k, C_k
     else:
         return 0,0,0
