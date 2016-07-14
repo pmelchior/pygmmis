@@ -36,6 +36,73 @@ import copy_reg
 import types
 copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
+
+# Blantant copy from Erin Sheldon's esutil
+# https://github.com/esheldon/esutil/blob/master/esutil/numpy_util.py
+def match1d(arr1input, arr2input, presorted=False):
+    """
+    NAME:
+        match
+    CALLING SEQUENCE:
+        ind1,ind2 = match(arr1, arr2, presorted=False)
+    PURPOSE:
+        Match two numpy arrays.  Return the indices of the matches or empty
+        arrays if no matches are found.  This means arr1[ind1] == arr2[ind2] is
+        true for all corresponding pairs.  arr1 must contain only unique
+        inputs, but arr2 may be non-unique.
+        If you know arr1 is sorted, set presorted=True and it will run
+        even faster
+    METHOD:
+        uses searchsorted with some sugar.  Much faster than old version
+        based on IDL code.
+    REVISION HISTORY:
+        Created 2015, Eli Rykoff, SLAC.
+    """
+
+    # make sure 1D
+    arr1 = np.array(arr1input, ndmin=1, copy=False)
+    arr2 = np.array(arr2input, ndmin=1, copy=False)
+
+    # check for integer data...
+    if (not issubclass(arr1.dtype.type,np.integer) or
+        not issubclass(arr2.dtype.type,np.integer)) :
+        mess="Error: only works with integer types, got %s %s"
+        mess = mess % (arr1.dtype.type,arr2.dtype.type)
+        raise ValueError(mess)
+
+    if (arr1.size == 0) or (arr2.size == 0) :
+        mess="Error: arr1 and arr2 must each be non-zero length"
+        raise ValueError(mess)
+
+    # make sure that arr1 has unique values...
+    test=np.unique(arr1)
+    if test.size != arr1.size:
+        raise ValueError("Error: the arr1input must be unique")
+
+    # sort arr1 if not presorted
+    if not presorted:
+        st1 = np.argsort(arr1)
+    else:
+        st1 = None
+
+    # search the sorted array
+    sub1=np.searchsorted(arr1,arr2,sorter=st1)
+
+    # check for out-of-bounds at the high end if necessary
+    if (arr2.max() > arr1.max()) :
+        bad,=np.where(sub1 == arr1.size)
+        sub1[bad] = arr1.size-1
+
+    if not presorted:
+        sub2,=np.where(arr1[st1[sub1]] == arr2)
+        sub1=st1[sub1[sub2]]
+    else:
+        sub2,=np.where(arr1[sub1] == arr2)
+        sub1=sub1[sub2]
+
+    return sub1,sub2
+
+
 def logsum(logX, axis=0):
     """Computes log of the sum along give axis from the log of the summands.
 
@@ -278,7 +345,6 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
     # set up pool
     import multiprocessing
-    import parmap
     pool = multiprocessing.Pool()
     n_chunks, chunksize = gmm._mp_chunksize()
 
@@ -286,11 +352,11 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # extra precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
     log_S = np.zeros(len(data)) # S = sum_k p(x|k)
-    N_ = np.zeros(len(data), dtype='bool') # N == 1 for points in the fit
+    H = np.zeros(len(data), dtype='bool') # H == 1 for points in the fit
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
-    empty = np.zeros(gmm.K, dtype=bool)
     nbh = [None for k in xrange(gmm.K)]
+    empty = np.zeros(gmm.K, dtype=bool)
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -308,30 +374,21 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     maxiter = max(100, gmm.K)
     if VERBOSITY:
         global VERB_BUFFER
-        if sel_callback is None:
-            print "ITER\tPOINTS\tLOG_L\tN_STABLE"
-        else:
-            print "ITER\tPOINTS\tLOG_L\tN_IN\tN_STABLE"
+        print "ITER\tPOINTS\tLOG_L\tN_STABLE"
 
     while it < maxiter: # limit loop in case of slow convergence
 
-        # compute p(i | k) for each k independently in the pool
-        # need S = sum_k p(i | k) for further calculation
-        # also N = {i | i in neighborhood[k]} for any k
-        k = 0
-        for log_p[k], nbh[k], T_inv[k], empty[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff_nd, pool=pool, chunksize=chunksize):
-            log_S[nbh[k]] += np.exp(log_p[k]) # actually S, not logS
-            N_[nbh[k]] = 1
-            k += 1
-
-        # need log(S), but since log(0) isn't a good idea, need to restrict to N_
-        log_S[N_] = np.log(log_S[N_])
-        log_L_ = log_S[N_].mean()
-        N = N_.sum()
+        log_L_, N = _EMstep(gmm, log_p, nbh, T_inv, empty, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
 
         if VERBOSITY:
             print ("%d\t%d\t%.3f" % (it, N, log_L_)),
+
+        # convergence tests:
+        if it > 0 and log_L_ - log_L < tol:
+            log_L = log_L_
+            if VERBOSITY:
+                print "\nmean likelihood converged within tolerance %r: stopping here." % tol
+            break
 
         if sel_callback is not None:
             # with imputation the observed data logL can decrease.
@@ -342,18 +399,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 gmm = gmm_
                 break
 
-        # perform M step with M-sums of data and imputations runs
-        _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff_nd, pool=pool, chunksize=chunksize, rng=rng)
-
-        # convergence test:
-        if it > 0 and log_L_ - log_L < tol:
-            log_L = log_L_
-            if VERBOSITY:
-                print "\nmean likelihood converged within tolerance %r: stopping here." % tol
-            break
-
         # with a a cutoff: we may have to update the nbhs
         if cutoff is not None:
+            """
             if empty.any():
                 # can init at random or reset them at previous position,
                 # increase covar and nbh for another try
@@ -362,6 +410,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
                 if VERBOSITY >= 2:
                     VERB_BUFFER += "\nresetting instable components: "
                     VERB_BUFFER += ("(" + "%d," * empty.sum() + ")") % tuple(np.flatnonzero(empty))
+            """
 
             # check if component has moved by more than sigma/2
             shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -387,17 +436,39 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
         # backup to see if components move of if next step gets worse
-        # note: not gmm = gmm_!
+        # note: gmm = gmm_!
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
         gmm_.covar[:,:,:] = gmm.covar[:,:,:]
 
         log_S[:] = 0
-        N_[:] = 0
+        H[:] = 0
         it += 1
 
     pool.close()
     return log_L, nbh
+
+def _EMstep(gmm, log_p, nbh, T_inv, empty, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
+    import parmap
+    # compute p(i | k) for each k independently in the pool
+    # need S = sum_k p(i | k) for further calculation
+    # also N = {i | i in neighborhood[k]} for any k
+    k = 0
+    for log_p[k], nbh[k], T_inv[k], empty[k] in \
+    parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+        log_S[nbh[k]] += np.exp(log_p[k]) # actually S, not logS
+        H[nbh[k]] = 1
+        k += 1
+
+    # need log(S), but since log(0) isn't a good idea, need to restrict to N_
+    log_S[H] = np.log(log_S[H])
+    log_L_ = log_S[H].mean()
+    N = H.sum()
+
+    # perform M step with M-sums of data and imputations runs
+    _M(gmm, nbh, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, rng=rng)
+    return log_L_, N
+
 
 def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
@@ -447,12 +518,13 @@ def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, nbh_k, T_inv_k, empty
 
 
-def _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel_callback=None, pool=None, chunksize=1, rng=np.random):
+def _M(gmm, nbh, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, rng=np.random):
 
     # save the M sums from observed data
-    A = np.empty(gmm.K)
-    M = np.empty((gmm.K, gmm.D))
-    C = np.empty((gmm.K, gmm.D, gmm.D))
+    A = np.empty(gmm.K)                 # sum for amplitudes
+    M = np.empty((gmm.K, gmm.D))        # ... means
+    C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
+    JS = np.empty(gmm.K)                # split criterion, zero if unused
 
     # perform sums for M step in the pool
     import parmap
@@ -461,32 +533,37 @@ def _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel
     parmap.starmap(_computeMSums, zip(xrange(gmm.K), nbh, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
 
-    if sel_callback is not None:
-        over = 1
-        tol = 1e-2
-        size = N*over
-        A2, M2, C2, N2 = _computeIMSums(gmm, size, sel_callback, nbh, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, rng=rng)
-        A2 /= over
-        M2 /= over
-        C2 /= over
-        N2 /= over
+    A2, M2, C2, N2 = _getIMSums(gmm, nbh, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, rng=rng)
 
-        if VERBOSITY:
-            sel_outside = A2 > tol * A
-            print "\t%d" % (gmm.K - sel_outside.sum()),
-            if VERBOSITY >= 2 and sel_outside.any():
-                global VERB_BUFFER
-                VERB_BUFFER += "\ncomponent inside fractions: "
-                VERB_BUFFER += ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2))
+    if VERBOSITY:
+        sel_outside = A2 > tol * A
+        if VERBOSITY >= 2 and sel_outside.any():
+            global VERB_BUFFER
+            VERB_BUFFER += "\ncomponent inside fractions: "
+            VERB_BUFFER += ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2))
+
+    _update(gmm, A, M, C, N, A2, M2, C2, N2, w)
+
+
+def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
+    # M-step for all components using data (and data2, if non-zero sums are set)
+
+    # partial EM: normal update for mean and covar, but constrained for amp
+    if altered is None:
+        changed = slice(None)
     else:
-        A2 = M2 = C2 = N2 = 0
+        changed = altered
 
-    # M-step for all components using data and data2
-    gmm.amp[:] = (A + A2)/ (N + N2)
+    if altered is None:
+        gmm.amp[changed] = (A + A2)[changed] / (N + N2)
+    else:
+        # Bovy eq. 31
+        unaltered = np.in1d(xrange(gmm.K), altered, assume_unique=True, invert=True)
+        gmm.amp[altered] = (A + A2)[altered] / (A + A2)[altered].sum() * (1 - (gmm.amp[unaltered]).sum())
     # because of finite precision during the imputation: renormalize
     gmm.amp /= gmm.amp.sum()
 
-    gmm.mean[:,:] = (M + M2)/(A + A2)[:,None]
+    gmm.mean[changed,:] = (M + M2)[changed,:]/(A + A2)[changed,None]
     # minimum covariance term?
     if w > 0:
         # we assume w to be a lower bound of the isotropic dispersion,
@@ -495,13 +572,14 @@ def _M(gmm, nbh, log_p, T_inv, log_S, N, data, covar=None, w=0, cutoff=None, sel
         # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
         # On average, q_j = N/K, so we'll adopt that to correct.
         w_eff = w**2 * ((N+N2)*1./gmm.K + 1)
-        gmm.covar[:,:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:]) / (A + A2 + 1)[:,None,None]
+        gmm.covar[changed,:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changed,:,:] / (A + A2 + 1)[changed,None,None]
     else:
-        gmm.covar[:,:,:] = (C + C2) / (A + A2)[:,None,None]
+        gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
 
 
 def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
     if log_p_k.size:
+
         # form log_q_ik by dividing with S = sum_k p_ik
         # NOTE:  this modifies log_p_k in place!
         # NOTE2: reshape needed when nbh_k is None because of its
@@ -541,17 +619,27 @@ def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
     else:
         return 0,0,0
 
-def _computeIMSums(gmm, size, sel_callback, nbh, covar=None, cutoff=None, pool=None, chunksize=1, rng=np.random):
-    # create fake data with same mechanism as the original data,
-    # but invert selection to get the missing part
-    data2, covar2, nbh2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, nbh=nbh, rng=rng)
 
-    A2 = np.zeros(gmm.K)
-    M2 = np.zeros((gmm.K, gmm.D))
-    C2 = np.zeros((gmm.K, gmm.D, gmm.D))
-    N2 = len(data2)
+def _getIMSums(gmm, nbh, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_callback=None, over=1, rng=np.random):
 
-    if N2:
+    A2 = M2 = C2 = N2 = 0
+
+    if sel_callback is not None:
+        tol = 1e-2
+        size = N*over
+
+        # create fake data with same mechanism as the original data,
+        # but invert selection to get the missing part
+        data2, covar2, nbh2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, nbh=nbh, rng=rng)
+
+        N2 = len(data2)
+        if N2 == 0:
+            return A2, M2, C2, N2
+
+        A2 = np.zeros(gmm.K)
+        M2 = np.zeros((gmm.K, gmm.D))
+        C2 = np.zeros((gmm.K, gmm.D, gmm.D))
+
         # similar setup as above, but since imputated points
         # are drawn from the model, we can avoid the caution of
         # dealing with outliers: all points will be considered
@@ -579,7 +667,14 @@ def _computeIMSums(gmm, size, sel_callback, nbh, covar=None, cutoff=None, pool=N
         parmap.starmap(_computeMSums, zip(xrange(gmm.K), nbh2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
             k += 1
 
+        # normalize over-sampling
+        A2 /= over
+        M2 /= over
+        C2 /= over
+        N2 /= over
+
     return A2, M2, C2, N2
+
 
 def _overlappingWith(k, gmm, cutoff=5):
     if cutoff is not None:
@@ -587,6 +682,7 @@ def _overlappingWith(k, gmm, cutoff=5):
         return np.flatnonzero(chi2_k < cutoff)
     else:
         return np.ones(gmm.K, dtype='bool')
+
 
 def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct=np.mean, rng=np.random):
 
