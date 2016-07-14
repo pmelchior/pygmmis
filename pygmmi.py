@@ -129,6 +129,16 @@ def logsum(logX, axis=0):
     c_shape[axis] = None
     return np.log(np.exp(logX + c[c_shape]).sum(axis=axis)) - c
 
+
+def chi2_cutoff(D, cutoff=3.):
+    # compute effective cutoff for chi2 in D dimensions
+    import scipy.stats
+    cdf_1d = scipy.stats.norm.cdf(cutoff)
+    confidence_1d = 1-(1-cdf_1d)*2
+    cutoff_nd = scipy.stats.chi2.ppf(confidence_1d, D)
+    return cutoff_nd
+
+
 class GMM(object):
     def __init__(self, K=1, D=1):
         self.amp = np.zeros((K))
@@ -363,10 +373,10 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # chi2 < cutoff,
         # while in fit() it means e.g. "cut at 3 sigma".
         # These differing conventions need to be documented well.
-        import scipy.stats
-        cdf_1d = scipy.stats.norm.cdf(cutoff)
-        confidence_1d = 1-(1-cdf_1d)*2
-        cutoff_nd = scipy.stats.chi2.ppf(confidence_1d, gmm.D)
+        cutoff_nd = chi2_cutoff(gmm.D, cutoff=cutoff)
+
+    # store chi2 cutoff for component shifts, use 0.5 sigma
+    shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.5, cutoff/2))
 
     # begin EM
     it = 0
@@ -402,14 +412,14 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         if cutoff is not None:
             # check if component has moved by more than sigma/2
             shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
-            moved = shift2 > 0.5**2
+            moved = shift2 > shift_cutoff
 
             # force update to nbh
             for c in moved:
                 nbh[c] = None
 
             if VERBOSITY:
-                print "\t%d" % (gmm.K - moved.size),
+                print "\t%d" % (gmm.K - moved.sum()),
 
             if VERBOSITY >= 2 and moved.any():
                 VERB_BUFFER += "\nresetting nbhs of moving components: "
