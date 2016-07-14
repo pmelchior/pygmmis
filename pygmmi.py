@@ -356,7 +356,6 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     log_p = [[] for k in xrange(gmm.K)]
     T_inv = [None for k in xrange(gmm.K)]
     nbh = [None for k in xrange(gmm.K)]
-    empty = np.zeros(gmm.K, dtype=bool)
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -378,7 +377,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
     while it < maxiter: # limit loop in case of slow convergence
 
-        log_L_, N = _EMstep(gmm, log_p, nbh, T_inv, empty, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
+        log_L_, N = _EMstep(gmm, log_p, nbh, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
 
         if VERBOSITY:
             print ("%d\t%d\t%.3f" % (it, N, log_L_)),
@@ -401,32 +400,20 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         # with a a cutoff: we may have to update the nbhs
         if cutoff is not None:
-            """
-            if empty.any():
-                # can init at random or reset them at previous position,
-                # increase covar and nbh for another try
-                gmm.mean[empty] = gmm_.mean[empty]
-                gmm.covar[empty] = gmm_.covar[~empty].mean(axis=0)
-                if VERBOSITY >= 2:
-                    VERB_BUFFER += "\nresetting instable components: "
-                    VERB_BUFFER += ("(" + "%d," * empty.sum() + ")") % tuple(np.flatnonzero(empty))
-            """
-
             # check if component has moved by more than sigma/2
             shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
             moved = shift2 > 0.5**2
 
-            if VERBOSITY >= 2 and moved.any():
-                VERB_BUFFER += "\nresetting nbhs of moving components: "
-                VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
-
             # force update to nbh
-            changed = np.flatnonzero(empty | moved)
-            for c in changed:
+            for c in moved:
                 nbh[c] = None
 
             if VERBOSITY:
-                print "\t%d" % (gmm.K - changed.size),
+                print "\t%d" % (gmm.K - moved.size),
+
+            if VERBOSITY >= 2 and moved.any():
+                VERB_BUFFER += "\nresetting nbhs of moving components: "
+                VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
 
         if VERBOSITY:
             print VERB_BUFFER
@@ -448,13 +435,13 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     pool.close()
     return log_L, nbh
 
-def _EMstep(gmm, log_p, nbh, T_inv, empty, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
+def _EMstep(gmm, log_p, nbh, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
     import parmap
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
     # also N = {i | i in neighborhood[k]} for any k
     k = 0
-    for log_p[k], nbh[k], T_inv[k], empty[k] in \
+    for log_p[k], nbh[k], T_inv[k] in \
     parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
         log_S[nbh[k]] += np.exp(log_p[k]) # actually S, not logS
         H[nbh[k]] = 1
@@ -492,7 +479,6 @@ def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
 
     # NOTE: close to convergence, we could stop applying the cutoff because
     # changes to nbh will be minimal
-    empty = False
     if cutoff is not None:
         indices = chi2 < cutoff
         if indices.any():
@@ -506,16 +492,12 @@ def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
                 nbh_k = np.flatnonzero(indices)
             else:
                 nbh_k = nbh_k[indices]
-        else:
-            # return values without cutoff selection
-            # but remember to reset component
-            empty = True
 
     # prevent tiny negative determinants to mess up
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, nbh_k, T_inv_k, empty
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, nbh_k, T_inv_k
 
 
 def _M(gmm, nbh, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, rng=np.random):
@@ -653,7 +635,7 @@ def _getIMSums(gmm, nbh, N, covar=None, cutoff=None, pool=None, chunksize=1, sel
         # i.e. all sums have flat weights
         import parmap
         k = 0
-        for log_p2[k], nbh2[k], T2_inv[k], _ in \
+        for log_p2[k], nbh2[k], T2_inv[k] in \
         parmap.starmap(_E, zip(xrange(gmm.K), nbh2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
             log_S2[nbh2[k]] += np.exp(log_p2[k])
             N2_[nbh2[k]] = 1
