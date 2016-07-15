@@ -344,14 +344,15 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
             k_ -= set([k])
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
+# leave everything as is
+def initDummy(gmm, data, covar=None, rng=np.random):
+    pass
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, rng=np.random):
+
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, split_n_merge=False, rng=np.random):
 
     # init components
     init_callback(gmm, data=data, covar=covar, rng=rng)
-    # save backup
-    import copy
-    gmm_ = copy.deepcopy(gmm)
 
     # set up pool
     import multiprocessing
@@ -361,11 +362,52 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
-    log_S = np.zeros(len(data)) # S = sum_k p(x|k)
+    log_S = np.zeros(len(data))           # S = sum_k p(x|k)
     H = np.zeros(len(data), dtype='bool') # H == 1 for points in the fit
-    log_p = [[] for k in xrange(gmm.K)]
-    T_inv = [None for k in xrange(gmm.K)]
-    nbh = [None for k in xrange(gmm.K)]
+    log_p = [[] for k in xrange(gmm.K)]   # P = p(x|k) for x in U[k]
+    T_inv = [None for k in xrange(gmm.K)] # T = covar(x) + gmm.covar[k]
+    U = [None for k in xrange(gmm.K)]     # U = {x close to k}
+
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, rng=rng)
+
+    # can we improve by split'n'merge of components?
+    while split_n_merge and gmm.K >= 3:
+
+        altered = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+
+        if VERBOSITY >= 2:
+            print "merging %d and %d, splitting %d" % tuple(altered)
+
+        # backup copy
+        import copy
+        gmm_ = copy.deepcopy(gmm)
+        U_ = [U[k].copy() for k in xrange(gmm.K)]
+
+        # modify components
+        _update_snm(gmm, altered, U, N+N2)
+
+        # forgo partial EM, run complete from the beginning:
+        # EM so far essentially an initialization
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, rng=rng)
+
+        if log_L > log_L_:
+            # revert to previous gmm
+            gmm.amp[:] = gmm_.amp[:]
+            gmm.mean[:,:] = gmm_.mean[:,:]
+            gmm.covar[:,:,:] = gmm_.covar[:,:,:]
+            U = U_
+            break
+
+        split_n_merge -= 1
+
+    pool.close()
+    return log_L, U
+
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
+
+    # save backup
+    import copy
+    gmm_ = copy.deepcopy(gmm)
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -378,52 +420,50 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # store chi2 cutoff for component shifts, use 0.5 sigma
     shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.5, cutoff/2))
 
-    # begin EM
     it = 0
     maxiter = max(100, gmm.K)
     if VERBOSITY:
         global VERB_BUFFER
-        print "ITER\tPOINTS\tLOG_L\tN_STABLE"
+        print "ITER\tPOINTS\tIMPUTED\tLOG_L\tSTABLE"
 
     while it < maxiter: # limit loop in case of slow convergence
+        log_S[:] = 0
+        H[:] = 0
 
-        log_L_, N = _EMstep(gmm, log_p, nbh, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
+        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
 
         if VERBOSITY:
-            print ("%d\t%d\t%.3f" % (it, N, log_L_)),
+            print ("%d\t%d\t%d\t%.3f" % (it, N, N2, log_L_)),
 
         # convergence tests:
         if it > 0 and log_L_ - log_L < tol:
-            log_L = log_L_
-            if VERBOSITY:
-                print "\nmean likelihood converged within tolerance %r: stopping here." % tol
-            break
-
-        if sel_callback is not None:
             # with imputation the observed data logL can decrease.
             # revert to previous model if that is the case
-            if it > 0 and log_L_ < log_L:
+            if sel_callback is not None and log_L_ < log_L:
+                gmm = gmm_
                 if VERBOSITY:
                     print "\nmean likelihood decreased: stopping reverting to previous model."
-                gmm = gmm_
-                break
+            else:
+                log_L = log_L_
+                if VERBOSITY:
+                    print "\nmean likelihood converged within tolerance %r: stopping here." % tol
+            break
 
-        # with a a cutoff: we may have to update the nbhs
+        # check if component has moved by more than sigma/2
+        shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
+        moved = shift2 > shift_cutoff
+
+        # force update to U
         if cutoff is not None:
-            # check if component has moved by more than sigma/2
-            shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
-            moved = shift2 > shift_cutoff
-
-            # force update to nbh
             for c in moved:
-                nbh[c] = None
+                U[c] = None
 
-            if VERBOSITY:
-                print "\t%d" % (gmm.K - moved.sum()),
+        if VERBOSITY:
+            print "\t%d" % (gmm.K - moved.sum()),
 
-            if VERBOSITY >= 2 and moved.any():
-                VERB_BUFFER += "\nresetting nbhs of moving components: "
-                VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
+        if VERBOSITY >= 2 and moved.any():
+            VERB_BUFFER += "\nresetting Us of moving components: "
+            VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
 
         if VERBOSITY:
             print VERB_BUFFER
@@ -433,28 +473,25 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
         # backup to see if components move of if next step gets worse
-        # note: gmm = gmm_!
+        # note: not gmm = gmm_ !
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
         gmm_.covar[:,:,:] = gmm.covar[:,:,:]
 
-        log_S[:] = 0
-        H[:] = 0
         it += 1
+    return log_L, N, N2
 
-    pool.close()
-    return log_L, nbh
 
-def _EMstep(gmm, log_p, nbh, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
     import parmap
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
     # also N = {i | i in neighborhood[k]} for any k
     k = 0
-    for log_p[k], nbh[k], T_inv[k] in \
-    parmap.starmap(_E, zip(xrange(gmm.K), nbh), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
-        log_S[nbh[k]] += np.exp(log_p[k]) # actually S, not logS
-        H[nbh[k]] = 1
+    for log_p[k], U[k], T_inv[k] in \
+    parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+        log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
+        H[U[k]] = 1
         k += 1
 
     # need log(S), but since log(0) isn't a good idea, need to restrict to N_
@@ -463,17 +500,17 @@ def _EMstep(gmm, log_p, nbh, T_inv, log_S, H, data, covar=None, sel_callback=Non
     N = H.sum()
 
     # perform M step with M-sums of data and imputations runs
-    _M(gmm, nbh, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, rng=rng)
-    return log_L_, N
+    N2 = _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, rng=rng)
+    return log_L_, N, N2
 
 
-def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
+def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
-    if nbh_k is None:
+    if U_k is None:
         dx = data - gmm.mean[k]
     else:
-        dx = data[nbh_k] - gmm.mean[k]
+        dx = data[U_k] - gmm.mean[k]
 
     if covar is None:
          T_inv_k = None
@@ -484,48 +521,47 @@ def _E(k, nbh_k, gmm, data, covar=None, cutoff=None):
         if covar.shape == (gmm.D, gmm.D): # one-for-all
             T_inv_k = np.linalg.inv(gmm.covar[k] + covar)
         else: # each datum has covariance
-            T_inv_k = np.linalg.inv(gmm.covar[k] + covar[nbh_k].reshape(len(dx), gmm.D, gmm.D))
+            T_inv_k = np.linalg.inv(gmm.covar[k] + covar[U_k].reshape(len(dx), gmm.D, gmm.D))
         chi2 = np.einsum('...i,...ij,...j', dx, T_inv_k, dx)
 
     # NOTE: close to convergence, we could stop applying the cutoff because
-    # changes to nbh will be minimal
+    # changes to U will be minimal
     if cutoff is not None:
         indices = chi2 < cutoff
         if indices.any():
-            # if all indices are used: probably time to increase nbh
+            # if all indices are used: probably time to increase U
             if indices.all():
                 changed = 0
             chi2 = chi2[indices]
             if covar is not None and covar.shape != (gmm.D, gmm.D):
                 T_inv_k = T_inv_k[indices]
-            if nbh_k is None:
-                nbh_k = np.flatnonzero(indices)
+            if U_k is None:
+                U_k = np.flatnonzero(indices)
             else:
-                nbh_k = nbh_k[indices]
+                U_k = U_k[indices]
 
     # prevent tiny negative determinants to mess up
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
-    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, nbh_k, T_inv_k
+    return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
 
-def _M(gmm, nbh, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, rng=np.random):
+def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, rng=np.random):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)                 # sum for amplitudes
     M = np.empty((gmm.K, gmm.D))        # ... means
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
-    JS = np.empty(gmm.K)                # split criterion, zero if unused
 
     # perform sums for M step in the pool
     import parmap
     k = 0
     for A[k], M[k,:], C[k,:,:] in \
-    parmap.starmap(_computeMSums, zip(xrange(gmm.K), nbh, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
+    parmap.starmap(_computeMSums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
 
-    A2, M2, C2, N2 = _getIMSums(gmm, nbh, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, rng=rng)
+    A2, M2, C2, N2 = _getIMSums(gmm, U, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, rng=rng)
 
     if VERBOSITY:
         sel_outside = A2 > tol * A
@@ -535,6 +571,7 @@ def _M(gmm, nbh, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, 
             VERB_BUFFER += ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2))
 
     _update(gmm, A, M, C, N, A2, M2, C2, N2, w)
+    return N2
 
 
 def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
@@ -569,14 +606,14 @@ def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
         gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
 
 
-def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
+def _computeMSums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
     if log_p_k.size:
 
         # form log_q_ik by dividing with S = sum_k p_ik
         # NOTE:  this modifies log_p_k in place!
-        # NOTE2: reshape needed when nbh_k is None because of its
+        # NOTE2: reshape needed when U_k is None because of its
         # implicit meaning as np.newaxis (which would create a 2D array)
-        log_p_k -= log_S[nbh_k].reshape(log_p_k.size)
+        log_p_k -= log_S[U_k].reshape(log_p_k.size)
 
         # amplitude: A_k = sum_i q_ik
         A_k = np.exp(logsum(log_p_k))
@@ -585,7 +622,7 @@ def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
         q_k = np.exp(log_p_k)
 
         # data with errors?
-        d = data[nbh_k].reshape((log_p_k.size, gmm.D))
+        d = data[U_k].reshape((log_p_k.size, gmm.D))
         if T_inv_k is None:
             # mean: M_k = sum_i x_i q_ik
             M_k = (d * q_k[:,None]).sum(axis=0)
@@ -612,7 +649,7 @@ def _computeMSums(k, nbh_k, log_p_k, T_inv_k, gmm, data, log_S):
         return 0,0,0
 
 
-def _getIMSums(gmm, nbh, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_callback=None, over=1, rng=np.random):
+def _getIMSums(gmm, U, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_callback=None, over=1, rng=np.random):
 
     A2 = M2 = C2 = N2 = 0
 
@@ -622,7 +659,7 @@ def _getIMSums(gmm, nbh, N, covar=None, cutoff=None, pool=None, chunksize=1, sel
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        data2, covar2, nbh2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, nbh=nbh, rng=rng)
+        data2, covar2, U2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, U=U, rng=rng)
 
         N2 = len(data2)
         if N2 == 0:
@@ -645,10 +682,10 @@ def _getIMSums(gmm, nbh, N, covar=None, cutoff=None, pool=None, chunksize=1, sel
         # i.e. all sums have flat weights
         import parmap
         k = 0
-        for log_p2[k], nbh2[k], T2_inv[k] in \
-        parmap.starmap(_E, zip(xrange(gmm.K), nbh2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
-            log_S2[nbh2[k]] += np.exp(log_p2[k])
-            N2_[nbh2[k]] = 1
+        for log_p2[k], U2[k], T2_inv[k] in \
+        parmap.starmap(_Estep, zip(xrange(gmm.K), U2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
+            log_S2[U2[k]] += np.exp(log_p2[k])
+            N2_[U2[k]] = 1
             k += 1
 
         log_S2[N2_] = np.log(log_S2[N2_])
@@ -656,7 +693,7 @@ def _getIMSums(gmm, nbh, N, covar=None, cutoff=None, pool=None, chunksize=1, sel
 
         k = 0
         for A2[k], M2[k,:], C2[k,:,:] in \
-        parmap.starmap(_computeMSums, zip(xrange(gmm.K), nbh2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
+        parmap.starmap(_computeMSums, zip(xrange(gmm.K), U2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
             k += 1
 
         # normalize over-sampling
@@ -676,7 +713,7 @@ def _overlappingWith(k, gmm, cutoff=5):
         return np.ones(gmm.K, dtype='bool')
 
 
-def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct=np.mean, rng=np.random):
+def _I(gmm, size, sel_callback, cutoff=3, covar=None, U=None, covar_reduce_fct=np.mean, rng=np.random):
 
     data2 = np.empty((size, gmm.D))
     if covar is None:
@@ -705,7 +742,7 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct
             if covar.shape == (gmm.D, gmm.D): # one-for-all
                 error_k = covar
             else:
-                error_k = covar_reduce_fct(covar[nbh[k]], axis=0)
+                error_k = covar_reduce_fct(covar[U[k]], axis=0)
                 covar2[lower:upper, :,:] = error_k
             data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + error_k, size=N2[k])
         component2[lower:upper] = k
@@ -719,16 +756,78 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, nbh=None, covar_reduce_fct
     if covar is not None and covar.shape != (gmm.D, gmm.D):
         covar2 = covar2[sel2]
 
-    # determine nbh of each component:
+    # determine U of each component:
     # since components may overlap, simply using component2 is insufficient.
     # for the sake of speed, we simply add all points whose components overlap
     # with the one in question
-    nbh2 = [None for k in xrange(gmm.K)]
+    U2 = [None for k in xrange(gmm.K)]
     for k in xrange(gmm.K):
         overlap_k = _overlappingWith(k, gmm, cutoff=cutoff)
         mask2 = np.zeros(len(data2), dtype='bool')
         for j in overlap_k:
             mask2 |= (component2 == j)
-        nbh2[k] = np.flatnonzero(mask2)
+        U2[k] = np.flatnonzero(mask2)
 
-    return data2, covar2, nbh2
+    return data2, covar2, U2
+
+
+def _JS(k, gmm, log_p, log_S, U, A):
+    log_q_k = log_p[k] - log_S[U[k]]
+    JS_k = np.dot(np.exp(log_q_k), log_q_k - np.log(A[k]) - log_p[k]) / A[k]
+    return JS_k
+
+def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
+    # find those components that are most similar
+    JM = np.zeros((gmm.K, gmm.K))
+    for k in xrange(gmm.K):
+        # don't need diagonal (can merge), and JM is symmetric
+        for j in xrange(k+1, gmm.K):
+            # get index list for intersection of U of k and l
+            # FIXME: match1d fails if either U is empty
+            # SOLUTION: merge empty U, split another
+            i_k, i_j = match1d(U[k], U[j], presorted=True)
+            # after Msum, log_p is in fact log_q
+            JM[k,j] = np.dot(np.exp(log_p[k][i_k]), np.exp(log_p[j][i_j]))
+    merge_jk = np.unravel_index(JM.argmax(), JM.shape)
+
+    # split the one whose p(x|k) deviate most from current Gaussian
+    # ask for the three worst components to avoid split being in merge_jk
+    JS = np.empty(gmm.K)
+    import parmap
+    k = 0
+    A = gmm.amp * N
+    for JS[k] in \
+    parmap.map(_JS, xrange(gmm.K), gmm, log_p, log_S, U, A, pool=pool, chunksize=chunksize):
+        k += 1
+    split_l3 = np.argsort(JS)[-3:][::-1]
+
+    # check that the three indices are unique
+    altered = np.array([merge_jk[0], merge_jk[1], split_l3[0]])
+    if split_l3[0] in merge_jk:
+        if split_l3[1] not in merge_jk:
+            altered[2] = split_l3[1]
+        else:
+            altered[2] = split_l3[2]
+
+    return altered
+
+def _update_snm(gmm, altered, U, N):
+    # reconstruct A from gmm.amp
+    A = gmm.amp * N
+
+    # update parameters and U
+    # merge 0 and 1, store in 0, Bovy eq. 39
+    gmm.amp[altered[0]] = gmm.amp[altered[0:2]].sum()
+    gmm.mean[altered[0]] = np.sum(gmm.mean[altered[0:2]] * A[altered[0:2]][:,None], axis=0) / A[altered[0:2]].sum()
+    # FIXME: sum of pos. definite matrices doesn't have to be pos. definite!s
+    gmm.covar[altered[0]] = np.sum(gmm.covar[altered[0:2]] * A[altered[0:2]][:,None,None], axis=0) / A[altered[0:2]].sum()
+    U[altered[0]] = np.union1d(U[altered[0]], U[altered[1]])
+    # split 2, store in 1 and 2, Bovy eq. 40
+    gmm.amp[altered[1:]] = gmm.amp[altered[2]] / 2
+    # modification to eq. 41: move means along the largest eigenvector of covar
+    _, radius2, rotation = np.linalg.svd(gmm.covar[altered[2]])
+    dl = np.sqrt(radius2[0]) *  rotation[0] / 2
+    gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
+    gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
+    gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1./gmm.D) * np.eye(gmm.D)
+    U[altered[1]] = U[altered[2]] # now 1 and 2 have same U
