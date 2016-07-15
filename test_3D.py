@@ -129,11 +129,15 @@ if __name__ == "__main__":
     D = 3
     C = 50
     w = 0.001
-    rng = np.random
+
+    seed = np.random.randint(1, 10000)
+    from numpy.random import RandomState
+    rng = RandomState(seed)
+    pygmmi.VERBOSITY = 1
 
     # define selection and create Omega in cube:
     # expensive, only do once
-    sel_callback = slopeSel
+    sel_callback = partial(slopeSel, rng=rng)
     """
     random = rng.rand(N*100, D)
     sel = sel_callback(random)
@@ -148,7 +152,7 @@ if __name__ == "__main__":
     count__cube = np.zeros((C,C,C))
     count0_cube = np.zeros((C,C,C))
 
-    R = 10
+    R = 1
     amp0 = np.empty(R*K)
     frac = np.empty(R*K)
     Omega = np.empty(R*K)
@@ -169,8 +173,7 @@ if __name__ == "__main__":
         # which K: K0 or K/N = const?
         K_ = K#int(K*omega_cube.mean())
         gmm = pygmmi.GMM(K=K_, D=3)
-        pygmmi.VERBOSITY = 1
-        pygmmi.fit(gmm, data, init_callback=pygmmi.initFromDataAtRandom, w=w, cutoff=5, rng=rng)
+        pygmmi.fit(gmm, data, init_callback=pygmmi.initFromDataAtRandom, w=w, cutoff=3, split_n_merge=K_/3, rng=rng)
         sample = gmm.draw(N, rng=rng)
         count_cube += binSample(sample, C)
 
@@ -180,7 +183,7 @@ if __name__ == "__main__":
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
         gmm_.covar[:,:,:] = 4*gmm.covar[:,:,:]
-        fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=dummy_init, w=w, cutoff=5, rng=rng)
+        fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=dummy_init, w=w, cutoff=3, split_n_merge=K_/3, rng=rng)
         sample = gmm_.draw(N, rng=rng)
         count__cube += binSample(sample, C)
 

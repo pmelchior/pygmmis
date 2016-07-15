@@ -281,7 +281,6 @@ class GMM(object):
 ############################
 
 VERBOSITY = False
-VERB_BUFFER = ""
 
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if k is None:
@@ -368,6 +367,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     T_inv = [None for k in xrange(gmm.K)] # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]     # U = {x close to k}
 
+    if VERBOSITY:
+        global VERB_BUFFER
+
     log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, rng=rng)
 
     # can we improve by split'n'merge of components?
@@ -376,7 +378,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         altered = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
 
         if VERBOSITY >= 2:
-            print "merging %d and %d, splitting %d" % tuple(altered)
+            print ("merging %d and %d, splitting %d" % tuple(altered))
 
         # backup copy
         import copy
@@ -388,22 +390,27 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         # forgo partial EM, run complete from the beginning:
         # EM so far essentially an initialization
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM-", rng=rng)
 
         if log_L > log_L_:
-            # revert to previous gmm
+            # revert to backup
             gmm.amp[:] = gmm_.amp[:]
             gmm.mean[:,:] = gmm_.mean[:,:]
             gmm.covar[:,:,:] = gmm_.covar[:,:,:]
             U = U_
+            if VERBOSITY:
+                print ("split'n'merge likelihood decreased: reverting to previous model")
+
             break
 
+        log_L = log_L_
         split_n_merge -= 1
+
 
     pool.close()
     return log_L, U
 
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", rng=np.random):
 
     # save backup
     import copy
@@ -424,7 +431,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
     maxiter = max(100, gmm.K)
     if VERBOSITY:
         global VERB_BUFFER
-        print "ITER\tPOINTS\tIMPUTED\tLOG_L\tSTABLE"
+        print("\nITER\tPOINTS\tIMPUTED\tLOG_L\tSTABLE")
 
     while it < maxiter: # limit loop in case of slow convergence
         log_S[:] = 0
@@ -432,8 +439,12 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
 
         log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
 
+        # check if component has moved by more than sigma/2
+        shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
+        moved = shift2 > shift_cutoff
+
         if VERBOSITY:
-            print ("%d\t%d\t%d\t%.3f" % (it, N, N2, log_L_)),
+            print("%s%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, log_L_, (gmm.K - moved.sum())))
 
         # convergence tests:
         if it > 0 and log_L_ - log_L < tol:
@@ -442,33 +453,20 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
             if sel_callback is not None and log_L_ < log_L:
                 gmm = gmm_
                 if VERBOSITY:
-                    print "\nmean likelihood decreased: stopping reverting to previous model."
+                    print("likelihood decreased: reverting to previous model")
             else:
                 log_L = log_L_
                 if VERBOSITY:
-                    print "\nmean likelihood converged within tolerance %r: stopping here." % tol
+                    print ("likelihood converged within tolerance %r: stopping here." % tol)
             break
 
-        # check if component has moved by more than sigma/2
-        shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
-        moved = shift2 > shift_cutoff
-
-        # force update to U
+        # force update to U for all moved components
         if cutoff is not None:
             for c in moved:
                 U[c] = None
 
-        if VERBOSITY:
-            print "\t%d" % (gmm.K - moved.sum()),
-
         if VERBOSITY >= 2 and moved.any():
-            VERB_BUFFER += "\nresetting Us of moving components: "
-            VERB_BUFFER += ("(" + "%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved))
-
-        if VERBOSITY:
-            print VERB_BUFFER
-            if len(VERB_BUFFER):
-                VERB_BUFFER = ""
+            print ("resetting Us of moving components: (" + ("%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved)))
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
@@ -566,9 +564,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
     if VERBOSITY:
         sel_outside = A2 > tol * A
         if VERBOSITY >= 2 and sel_outside.any():
-            global VERB_BUFFER
-            VERB_BUFFER += "\ncomponent inside fractions: "
-            VERB_BUFFER += ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2))
+            print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
     _update(gmm, A, M, C, N, A2, M2, C2, N2, w)
     return N2
