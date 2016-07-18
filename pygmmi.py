@@ -374,9 +374,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
     # can we improve by split'n'merge of components?
     while split_n_merge and gmm.K >= 3:
-        altered = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+        altered, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
 
-        if VERBOSITY >= 2:
+        if VERBOSITY:
             print ("merging %d and %d, splitting %d" % tuple(altered))
 
         # backup copy
@@ -385,13 +385,13 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         U_ = [U[k].copy() for k in xrange(gmm.K)]
 
         # modify components
-        _update_snm(gmm, altered, U, N+N2)
+        _update_snm(gmm, altered, U, N+N2, cleanup)
 
         # forgo partial EM, run complete from the beginning:
         # EM so far essentially an initialization
         log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM-", rng=rng)
 
-        if log_L > log_L_:
+        if log_L >= log_L_:
             # revert to backup
             gmm.amp[:] = gmm_.amp[:]
             gmm.mean[:,:] = gmm_.mean[:,:]
@@ -601,10 +601,11 @@ def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
 
 def _computeMSums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
     if log_p_k.size:
-
-        # form log_q_ik by dividing with S = sum_k p_ik
-        # NOTE:  this modifies log_p_k in place!
-        # NOTE2: reshape needed when U_k is None because of its
+        # get log_q_ik by dividing with S = sum_k p_ik
+        # NOTE:  this modifies log_p_k in place, but is only relevant
+        # within this method since the call is parallel and its arguments
+        # therefore don't get updated.
+        # NOTE: reshape needed when U_k is None because of its
         # implicit meaning as np.newaxis (which would create a 2D array)
         log_p_k -= log_S[U_k].reshape(log_p_k.size)
 
@@ -662,27 +663,24 @@ def _getIMSums(gmm, U, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_c
         M2 = np.zeros((gmm.K, gmm.D))
         C2 = np.zeros((gmm.K, gmm.D, gmm.D))
 
-        # similar setup as above, but since imputated points
-        # are drawn from the model, we can avoid the caution of
-        # dealing with outliers: all points will be considered
+        # similar setup as above: E-step plus the sums from the Mstep.
+        # the latter will be added to the original data sums
         log_S2 = np.zeros(len(data2))
-        N2_ = np.zeros(len(data2), dtype='bool')
+        H2 = np.zeros(len(data2), dtype='bool')
         log_p2 = [[] for k in xrange(gmm.K)]
         T2_inv = [None for k in xrange(gmm.K)]
 
-        # run E-step: only needed to account for components that
-        # overlap outside. Otherwise log_q_ik = 0 for all i,k,
-        # i.e. all sums have flat weights
+        # run E-step.
         import parmap
         k = 0
         for log_p2[k], U2[k], T2_inv[k] in \
-        parmap.starmap(_Estep, zip(xrange(gmm.K), U2), gmm, data2, covar2, None, pool=pool, chunksize=chunksize):
+        parmap.starmap(_Estep, zip(xrange(gmm.K), U2), gmm, data2, covar2, cutoff, pool=pool, chunksize=chunksize):
             log_S2[U2[k]] += np.exp(log_p2[k])
-            N2_[U2[k]] = 1
+            H2[U2[k]] = 1
             k += 1
 
-        log_S2[N2_] = np.log(log_S2[N2_])
-        N2 = N2_.sum()
+        log_S2[H2] = np.log(log_S2[H2])
+        N2 = H2.sum()
 
         k = 0
         for A2[k], M2[k,:], C2[k,:,:] in \
@@ -784,8 +782,13 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     merge_jk = np.unravel_index(JM.argmax(), JM.shape)
     # if all Us are disjunct, JM is blank and merge_jk = [0,0]
     # merge two smallest components and clean up from the bottom
+    cleanup = False
     if merge_jk[0] == 0 and merge_jk[1] == 0:
+        global VERBOSITY
+        if VERBOSITY >= 2:
+            print "neighborhoods disjunct. merging components %d and %d" % tuple(merge_jk)
         merge_jk = np.argsort(gmm.amp)[:2]
+        cleanup = True
 
     """
     # split the one whose p(x|k) deviate most from current Gaussian
@@ -798,8 +801,9 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     parmap.map(_JS, xrange(gmm.K), gmm, log_p, log_S, U, A, pool=pool, chunksize=chunksize):
         k += 1
     """
-    # get largest Eigenvalue
-    JS = np.linalg.svd(gmm.covar, full_matrices=False, compute_uv=False)[:,0]
+    # get largest Eigenvalue ratio of first to second
+    EV = np.linalg.svd(gmm.covar, full_matrices=False, compute_uv=False)
+    JS = EV[:,0] / EV[:,1]
     split_l3 = np.argsort(JS)[-3:][::-1]
 
     # check that the three indices are unique
@@ -809,23 +813,32 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
             altered[2] = split_l3[1]
         else:
             altered[2] = split_l3[2]
-    return altered
+    return altered, cleanup
 
-def _update_snm(gmm, altered, U, N):
+def _update_snm(gmm, altered, U, N, cleanup):
     # reconstruct A from gmm.amp
     A = gmm.amp * N
 
     # update parameters and U
     # merge 0 and 1, store in 0, Bovy eq. 39
     gmm.amp[altered[0]] = gmm.amp[altered[0:2]].sum()
-    gmm.mean[altered[0]] = np.sum(gmm.mean[altered[0:2]] * A[altered[0:2]][:,None], axis=0) / A[altered[0:2]].sum()
-    gmm.covar[altered[0]] = np.sum(gmm.covar[altered[0:2]] * A[altered[0:2]][:,None,None], axis=0) / A[altered[0:2]].sum()
-    U[altered[0]] = np.union1d(U[altered[0]], U[altered[1]])
+    if not cleanup:
+        gmm.mean[altered[0]] = np.sum(gmm.mean[altered[0:2]] * A[altered[0:2]][:,None], axis=0) / A[altered[0:2]].sum()
+        gmm.covar[altered[0]] = np.sum(gmm.covar[altered[0:2]] * A[altered[0:2]][:,None,None], axis=0) / A[altered[0:2]].sum()
+        U[altered[0]] = np.union1d(U[altered[0]], U[altered[1]])
+    else:
+        # if we're cleaning up the weakest components:
+        # merging does not lead to valid component parameters as the original
+        # ones can be anywhere. Simply adopt second one.
+        gmm.mean[altered[0],:] = gmm.mean[altered[1],:]
+        gmm.covar[altered[0],:,:] = gmm.covar[altered[1],:,:]
+        U[altered[0]] = U[altered[1]]
+
     # split 2, store in 1 and 2
-    # following SVD method in Zhang 2003, with alpha=1/2, u = 1/2
+    # following SVD method in Zhang 2003, with alpha=1/2, u = 1/4
     gmm.amp[altered[1]] = gmm.amp[altered[2]] = gmm.amp[altered[2]] / 2
     _, radius2, rotation = np.linalg.svd(gmm.covar[altered[2]])
-    dl = np.sqrt(radius2[0]) *  rotation[0] / 2
+    dl = np.sqrt(radius2[0]) *  rotation[0] / 4
     gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
     gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
     gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1./gmm.D) * np.eye(gmm.D)
