@@ -389,7 +389,8 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         # forgo partial EM, run complete from the beginning:
         # EM so far essentially an initialization
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM-", rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM_F", altered=None, rng=rng)
 
         if log_L >= log_L_:
             # revert to backup
@@ -407,7 +408,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     pool.close()
     return log_L, U
 
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
 
     # save backup
     import copy
@@ -434,7 +435,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
         log_S[:] = 0
         H[:] = 0
 
-        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, rng=rng)
+        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -477,7 +478,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
     return log_L, N, N2
 
 
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, rng=np.random):
     import parmap
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
@@ -485,8 +486,9 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     k = 0
     for log_p[k], U[k], T_inv[k] in \
     parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
-        log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
-        H[U[k]] = 1
+        if altered is None or (altered is not None and k in altered):
+            log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
+            H[U[k]] = 1
         k += 1
 
     # need log(S), but since log(0) isn't a good idea, need to restrict to N_
@@ -495,7 +497,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     N = H.sum()
 
     # perform M step with M-sums of data and imputations runs
-    N2 = _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, rng=rng)
+    N2 = _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, altered=altered, rng=rng)
     return log_L_, N, N2
 
 
@@ -542,7 +544,7 @@ def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
 
-def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, rng=np.random):
+def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, altered=None, rng=np.random):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)                 # sum for amplitudes
@@ -563,7 +565,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
         if VERBOSITY >= 2 and sel_outside.any():
             print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
-    _update(gmm, A, M, C, N, A2, M2, C2, N2, w)
+    _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=altered)
     return N2
 
 
@@ -790,9 +792,10 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
         merge_jk = np.argsort(gmm.amp)[:2]
         cleanup = True
 
-    """
+
     # split the one whose p(x|k) deviate most from current Gaussian
     # ask for the three worst components to avoid split being in merge_jk
+    """
     JS = np.empty(gmm.K)
     import parmap
     k = 0
@@ -803,7 +806,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     """
     # get largest Eigenvalue ratio of first to second
     EV = np.linalg.svd(gmm.covar, full_matrices=False, compute_uv=False)
-    JS = EV[:,0] / EV[:,1]
+    JS = EV[:,0] * gmm.amp
     split_l3 = np.argsort(JS)[-3:][::-1]
 
     # check that the three indices are unique
@@ -842,4 +845,4 @@ def _update_snm(gmm, altered, U, N, cleanup):
     gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
     gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
     gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1./gmm.D) * np.eye(gmm.D)
-    U[altered[1]] = U[altered[2]] # now 1 and 2 have same U
+    U[altered[1]] = U[altered[2]].copy() # now 1 and 2 have same U
