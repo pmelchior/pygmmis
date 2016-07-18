@@ -375,7 +375,12 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # can we improve by split'n'merge of components?
     while split_n_merge and gmm.K >= 3:
 
-        altered = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+        try:
+            altered = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+        except RuntimeError:
+            if VERBOSITY >= 2:
+                print ("merging impossible: neighborhoods disjunct. reverting")
+            break
 
         if VERBOSITY >= 2:
             print ("merging %d and %d, splitting %d" % tuple(altered))
@@ -390,6 +395,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         # forgo partial EM, run complete from the beginning:
         # EM so far essentially an initialization
+        # FIXME: Does not seem to work so well!
         log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM-", rng=rng)
 
         if log_L > log_L_:
@@ -400,12 +406,10 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
             U = U_
             if VERBOSITY:
                 print ("split'n'merge likelihood decreased: reverting to previous model")
-
             break
 
         log_L = log_L_
         split_n_merge -= 1
-
 
     pool.close()
     return log_L, U
@@ -466,7 +470,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
                 U[c] = None
 
         if VERBOSITY >= 2 and moved.any():
-            print ("resetting Us of moving components: (" + ("%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved)))
+            print ("resetting neighborhoods of moving components: (" + ("%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved)))
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
@@ -769,7 +773,7 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, U=None, covar_reduce_fct=n
 
 def _JS(k, gmm, log_p, log_S, U, A):
     log_q_k = log_p[k] - log_S[U[k]]
-    JS_k = np.dot(np.exp(log_q_k), log_q_k - np.log(A[k]) - log_p[k]) / A[k]
+    JS_k = np.dot(np.exp(log_q_k), log_q_k - np.log(A[k]) - log_p[k] + np.log(gmm.amp[k])) / A[k]
     return JS_k
 
 def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
@@ -785,6 +789,9 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
             # after Msum, log_p is in fact log_q
             JM[k,j] = np.dot(np.exp(log_p[k][i_k]), np.exp(log_p[j][i_j]))
     merge_jk = np.unravel_index(JM.argmax(), JM.shape)
+    # if all Us are disjunct, JM is blank and merge_jk = [0,0]
+    if merge_jk[0] == 0 and merge_jk[1] == 0:
+        raise RuntimeError("Merge criterion undefined: neighborhoods disjunct.")
 
     # split the one whose p(x|k) deviate most from current Gaussian
     # ask for the three worst components to avoid split being in merge_jk
@@ -815,14 +822,13 @@ def _update_snm(gmm, altered, U, N):
     # merge 0 and 1, store in 0, Bovy eq. 39
     gmm.amp[altered[0]] = gmm.amp[altered[0:2]].sum()
     gmm.mean[altered[0]] = np.sum(gmm.mean[altered[0:2]] * A[altered[0:2]][:,None], axis=0) / A[altered[0:2]].sum()
-    # FIXME: sum of pos. definite matrices doesn't have to be pos. definite!s
     gmm.covar[altered[0]] = np.sum(gmm.covar[altered[0:2]] * A[altered[0:2]][:,None,None], axis=0) / A[altered[0:2]].sum()
     U[altered[0]] = np.union1d(U[altered[0]], U[altered[1]])
     # split 2, store in 1 and 2, Bovy eq. 40
     gmm.amp[altered[1:]] = gmm.amp[altered[2]] / 2
     # modification to eq. 41: move means along the largest eigenvector of covar
     _, radius2, rotation = np.linalg.svd(gmm.covar[altered[2]])
-    dl = np.sqrt(radius2[0]) *  rotation[0] / 2
+    dl = np.sqrt(radius2[0]) *  rotation[0] / 4
     gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
     gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
     gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1./gmm.D) * np.eye(gmm.D)
