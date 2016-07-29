@@ -394,9 +394,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         if log_L >= log_L_:
             # revert to backup
-            gmm.amp[:] = gmm_.amp[:]
-            gmm.mean[:,:] = gmm_.mean[:,:]
-            gmm.covar[:,:,:] = gmm_.covar[:,:,:]
+            gmm = gmm_
             U = U_
             if VERBOSITY:
                 print ("split'n'merge likelihood decreased: reverting to previous model")
@@ -432,8 +430,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
         print("\nITER\tPOINTS\tIMPUTED\tLOG_L\tSTABLE")
 
     while it < maxiter: # limit loop in case of slow convergence
-        log_S[:] = 0
-        H[:] = 0
 
         log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, rng=rng)
 
@@ -480,6 +476,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
 
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, rng=np.random):
     import parmap
+
+    log_S[:] = 0
+    H[:] = 0
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
     # also N = {i | i in neighborhood[k]} for any k
@@ -804,7 +803,8 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     parmap.map(_JS, xrange(gmm.K), gmm, log_p, log_S, U, A, pool=pool, chunksize=chunksize):
         k += 1
     """
-    # get largest Eigenvalue ratio of first to second
+    # get largest Eigenvalue, weighed by amplitude:
+    # somewhat unjustified, but works good in practice
     EV = np.linalg.svd(gmm.covar, full_matrices=False, compute_uv=False)
     JS = EV[:,0] * gmm.amp
     split_l3 = np.argsort(JS)[-3:][::-1]
