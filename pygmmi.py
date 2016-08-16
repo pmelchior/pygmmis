@@ -343,15 +343,12 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
             k_ -= set([k])
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
-# leave everything as is
-def initDummy(gmm, data, covar=None, rng=np.random):
-    pass
 
-
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=initFromDataAtRandom, tol=1e-3, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=None, tol=1e-3, split_n_merge=False, rng=np.random):
 
     # init components
-    init_callback(gmm, data=data, covar=covar, rng=rng)
+    if init_callback is not None:
+        init_callback(gmm, data=data, covar=covar, rng=rng)
 
     # set up pool
     import multiprocessing
