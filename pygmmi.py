@@ -387,9 +387,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # modify components
         _update_snm(gmm, altered, U, N+N2, cleanup)
 
-        # forgo partial EM, run complete from the beginning:
-        # EM so far essentially an initialization
+        # run partial EM on altered components
         log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
+
         log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM_F", altered=None, rng=rng)
 
         if log_L >= log_L_:
@@ -431,7 +431,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
 
     while it < maxiter: # limit loop in case of slow convergence
 
-        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, rng=rng)
+        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -474,21 +474,32 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
     return log_L, N, N2
 
 
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
     import parmap
 
-    log_S[:] = 0
-    H[:] = 0
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
     # also N = {i | i in neighborhood[k]} for any k
+    log_S[:] = 0
+    H[:] = 0
     k = 0
     for log_p[k], U[k], T_inv[k] in \
     parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
-        if altered is None or (altered is not None and k in altered):
-            log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
-            H[U[k]] = 1
+        log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
+        H[U[k]] = 1
         k += 1
+
+    # NOTE: for a partial run, we'd only need the change to Log_S from the
+    # altered components. However, the neighborhoods can change from _update_snm
+    # or because they move, so that operation is ill-defined.
+    # Thus, we'll always run a full E-step, which is pretty cheap for
+    # converged neighborhood.
+    # The M-step could in principle be run on the altered components only,
+    # but there seem to be side effects in what I've tried.
+    # Similar to the E-step, the imputation step needs to be run on all
+    # components, otherwise the contribution of the altered ones to the mixture
+    # would be over-estimated.
+    # Effectively, partial runs are as expensive as full runs.
 
     # need log(S), but since log(0) isn't a good idea, need to restrict to N_
     log_S[H] = np.log(log_S[H])
@@ -551,12 +562,17 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
 
     # perform sums for M step in the pool
+    # FIXME: in a partial run, could work on altered components only;
+    # however, there seem to be side effects or race conditions
     import parmap
     k = 0
     for A[k], M[k,:], C[k,:,:] in \
     parmap.starmap(_computeMSums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
 
+    # imputation step needs to be done with all components, even if only
+    # altered ones are relevant for a partial run, otherwise their contribution
+    # gets over-estimated
     A2, M2, C2, N2 = _getIMSums(gmm, U, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, rng=rng)
 
     if VERBOSITY:
@@ -671,7 +687,7 @@ def _getIMSums(gmm, U, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_c
         log_p2 = [[] for k in xrange(gmm.K)]
         T2_inv = [None for k in xrange(gmm.K)]
 
-        # run E-step.
+        # run E-step on data2
         import parmap
         k = 0
         for log_p2[k], U2[k], T2_inv[k] in \
