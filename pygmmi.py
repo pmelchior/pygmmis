@@ -818,8 +818,10 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     parmap.map(_JS, xrange(gmm.K), gmm, log_p, log_S, U, A, pool=pool, chunksize=chunksize):
         k += 1
     """
-    # get largest Eigenvalue, weighed by amplitude:
-    # somewhat unjustified, but works good in practice
+    # get largest Eigenvalue, weighed by amplitude
+    # Large EV implies extended object, which often is caused by coverving
+    # multiple clusters. This happes also for almost empty components, which
+    # should rather be merged than split, hence amplitude weights.
     EV = np.linalg.svd(gmm.covar, compute_uv=False)
     JS = EV[:,0] * gmm.amp
     split_l3 = np.argsort(JS)[-3:][::-1]
