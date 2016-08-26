@@ -369,17 +369,20 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
     log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, rng=rng)
 
-    # can we improve by split'n'merge of components?
+    # should we try to improve by split'n'merge of components?
+    # if so, keep backup copy
+    gmm_ = GMM(gmm.K, gmm.D)
     while split_n_merge and gmm.K >= 3:
+
+        gmm_.amp[:] = gmm.amp[:]
+        gmm_.mean[:] = gmm.mean[:,:]
+        gmm_.covar[:,:,:] = gmm.covar[:,:,:]
+        U_ = [U[k].copy() for k in xrange(gmm.K)]
+
         altered, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
 
         if VERBOSITY:
             print ("merging %d and %d, splitting %d" % tuple(altered))
-
-        # backup copy
-        import copy
-        gmm_ = copy.deepcopy(gmm)
-        U_ = [U[k].copy() for k in xrange(gmm.K)]
 
         # modify components
         _update_snm(gmm, altered, U, N+N2, cleanup)
@@ -391,7 +394,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
 
         if log_L >= log_L_:
             # revert to backup
-            gmm = gmm_
+            gmm.amp[:] = gmm_.amp[:]
+            gmm.mean[:] = gmm_.mean[:,:]
+            gmm.covar[:,:,:] = gmm_.covar[:,:,:]
             U = U_
             if VERBOSITY:
                 print ("split'n'merge likelihood decreased: reverting to previous model")
@@ -404,10 +409,6 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     return log_L, U
 
 def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
-
-    # save backup
-    import copy
-    gmm_ = copy.deepcopy(gmm)
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -426,6 +427,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
         global VERB_BUFFER
         print("\nITER\tPOINTS\tIMPUTED\tLOG_L\tSTABLE")
 
+    # save backup
+    gmm_ = GMM(gmm.K, gmm.D)
+    gmm_.amp[:] = gmm.amp[:]
+    gmm_.mean[:,:] = gmm.mean[:,:]
+    gmm_.covar[:,:,:] = gmm.covar[:,:,:]
     while it < maxiter: # limit loop in case of slow convergence
 
         log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
@@ -442,7 +448,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
             # with imputation the observed data logL can decrease.
             # revert to previous model if that is the case
             if sel_callback is not None and log_L_ < log_L:
-                gmm = gmm_
+                gmm.amp[:] = gmm_.amp[:]
+                gmm.mean[:,:] = gmm_.mean[:,:]
+                gmm.covar[:,:,:] = gmm_.covar[:,:,:]
                 if VERBOSITY:
                     print("likelihood decreased: reverting to previous model")
             else:
@@ -461,7 +469,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
-        # backup to see if components move of if next step gets worse
+        # backup to see if components move or if next step gets worse
         # note: not gmm = gmm_ !
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
