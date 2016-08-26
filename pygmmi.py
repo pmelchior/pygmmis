@@ -784,6 +784,9 @@ def _JS(k, gmm, log_p, log_S, U, A):
 def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     # find those components that are most similar
     JM = np.zeros((gmm.K, gmm.K))
+    # compute log_q (posterior for k given i), but use normalized probabilities
+    # to allow for merging of empty components
+    log_q = [log_p[k] - log_S[U[k]] - np.log(gmm.amp[k]) for k in xrange(gmm.K)]
     for k in xrange(gmm.K):
         # don't need diagonal (can merge), and JM is symmetric
         for j in xrange(k+1, gmm.K):
@@ -791,8 +794,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
             # FIXME: match1d fails if either U is empty
             # SOLUTION: merge empty U, split another
             i_k, i_j = match1d(U[k], U[j], presorted=True)
-            # after Msum, log_p is in fact log_q
-            JM[k,j] = np.dot(np.exp(log_p[k][i_k]), np.exp(log_p[j][i_j]))
+            JM[k,j] = np.dot(np.exp(log_q[k][i_k]), np.exp(log_q[j][i_j]))
     merge_jk = np.unravel_index(JM.argmax(), JM.shape)
     # if all Us are disjunct, JM is blank and merge_jk = [0,0]
     # merge two smallest components and clean up from the bottom
@@ -818,7 +820,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     """
     # get largest Eigenvalue, weighed by amplitude:
     # somewhat unjustified, but works good in practice
-    EV = np.linalg.svd(gmm.covar, full_matrices=False, compute_uv=False)
+    EV = np.linalg.svd(gmm.covar, compute_uv=False)
     JS = EV[:,0] * gmm.amp
     split_l3 = np.argsort(JS)[-3:][::-1]
 
