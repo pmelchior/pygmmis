@@ -26,7 +26,8 @@ def binSample(coords, C):
 def initCube(gmm, w=0, rng=np.random):
     #gmm.amp[:] = rng.rand(gmm.K)
     #gmm.amp /= gmm.amp.sum()
-    alpha = 100
+    global K
+    alpha = K
     gmm.amp[:] = rng.dirichlet(alpha*np.ones(gmm.K)/K, 1)[0]
     gmm.mean[:,:] = rng.rand(gmm.K,gmm.D)
     for k in xrange(gmm.K):
@@ -92,23 +93,45 @@ def plotPoints(coords, ax=None, depth_shading=True, **kwargs):
 def slopeSel(coords, gmm=None, rng=np.random):
     return rng.rand(len(coords)) > coords[:,0]
 
+def noSel(coords, gmm=None, rng=np.random):
+    return np.ones(len(coords), dtype="bool")
+
 def insideComponent(k, gmm, coords, covar=None, cutoff=5.):
-    return gmm.logL_k(k, coords, covar=covar, chi2_only=True) < cutoff
+    if gmm.amp[k]*K > 0.01:
+        return gmm.logL_k(k, coords, covar=covar, chi2_only=True) < cutoff
+    else:
+        return np.zeros(len(coords), dtype='bool')
 
-def GMMSel(coords, gmm=None, covar=None, sel_gmm=None, cutoff=3., rng=np.random):
-    # compute effective cutoff for chi2 cutoff
-    import scipy.stats
-    cdf_1d = scipy.stats.norm.cdf(cutoff)
-    confidence_1d = 1-(1-cdf_1d)*2
-    cutoff_nd = scipy.stats.chi2.ppf(confidence_1d, sel_gmm.D)
-
+def GMMSel(coords, gmm=None, covar=None, sel_gmm=None, cutoff_nd=3., rng=np.random):
     # swiss cheese selection based on a GMM:
     # if within 1 sigma of any component: you're out!
-    import multiprocessing
-    import parmap
+    import multiprocessing, parmap
     n_chunks, chunksize = sel_gmm._mp_chunksize()
     inside = np.array(parmap.map(insideComponent, xrange(sel_gmm.K), sel_gmm, coords, covar, cutoff_nd, chunksize=chunksize))
     return np.max(inside, axis=0)
+
+def max_posterior(gmm, U, coords, covar=None):
+    import multiprocessing, parmap
+    pool = multiprocessing.Pool()
+    n_chunks, chunksize = gmm._mp_chunksize()
+    log_p = [[] for k in xrange(gmm.K)]
+    log_S = np.zeros(len(coords))
+    H = np.zeros(len(coords), dtype="bool")
+    k = 0
+    for log_p[k], U[k], _ in \
+    parmap.starmap(pygmmi._Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+        log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
+        H[U[k]] = 1
+        k += 1
+    log_S[H] = np.log(log_S[H])
+
+    max_q = np.zeros(len(coords))
+    max_k = np.zeros(len(coords), dtype='uint32')
+    for k in xrange(gmm.K):
+        q_k = np.exp(log_p[k] - log_S[U[k]])
+        max_k[U[k]] = np.where(max_q[U[k]] < q_k, k, max_k[U[k]])
+        max_q[U[k]] = np.maximum(max_q[U[k]],q_k)
+    return max_k
 
 # from http://stackoverflow.com/questions/36740887/how-can-a-python-context-manager-try-to-execute-code
 def try_forever(f):
@@ -120,17 +143,15 @@ def try_forever(f):
                 pass
     return decorated
 
-def dummy_init(gmm, data, covar=None, rng=np.random):
-    pass
-
 if __name__ == "__main__":
-    N = 1000
-    K = 10
+    N = 10000
+    K = 50
     D = 3
     C = 50
     w = 0.001
+    inner_cutoff = 1
 
-    seed = np.random.randint(1, 10000)
+    seed = 42#np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmi.VERBOSITY = 1
@@ -152,66 +173,116 @@ if __name__ == "__main__":
     count__cube = np.zeros((C,C,C))
     count0_cube = np.zeros((C,C,C))
 
-    R = 1
+    R = 10
     amp0 = np.empty(R*K)
     frac = np.empty(R*K)
     Omega = np.empty(R*K)
     assoc_frac = np.empty(R*K)
+    posterior = np.empty(R*K)
 
+    cutoff_nd = pygmmi.chi2_cutoff(D, cutoff=inner_cutoff)
+    counter = 0
     for r in xrange(R):
+        print "start"
         # create original sample from GMM
         gmm0 = pygmmi.GMM(K=K, D=D)
-        initCube(gmm0, w=w, rng=rng)
-        amp0[r*K:(r+1)*K] = gmm0.amp
+        initCube(gmm0, w=w*10, rng=rng) # use larger size floor than in fit
         data0, nbh0 = drawWithNbh(gmm0, N, rng=rng)
+
+        # apply selection
+        sel0 = sel_callback(data0)
+
+        # how often is each component used
+        comp0 = np.empty(len(data0), dtype='uint32')
+        for k in xrange(gmm0.K):
+            comp0[nbh0[k]] = k
+        count0 = np.bincount(comp0, minlength=gmm0.K)
+
+        # compute effective Omega
+        comp = comp0[sel0]
+        count = np.bincount(comp, minlength=gmm0.K)
+
+        frac__ = count.astype('float') / count.sum()
+        Omega__ = count.astype('float') / count0
+
+        # restrict to "safe" components
+        safe = frac__ >=  0#1./2 * 1./ K
+        if safe.sum() < gmm0.K:
+            print "reset to safe components"
+            gmm0.amp = gmm0.amp[safe]
+            gmm0.amp /= gmm0.amp.sum()
+            gmm0.mean = gmm0.mean[safe]
+            gmm0.covar = gmm0.covar[safe]
+
+            # redraw data0 and sel0
+            data0, nbh0 = drawWithNbh(gmm0, N, rng=rng)
+            sel0 = sel_callback(data0)
+
+            # recompute effective Omega and frac
+            # how often is each component used
+            comp0 = np.empty(len(data0), dtype='uint32')
+            for k in xrange(gmm0.K):
+                comp0[nbh0[k]] = k
+            count0 = np.bincount(comp0, minlength=gmm0.K)
+            comp = comp0[sel0]
+            count = np.bincount(comp, minlength=gmm0.K)
+
+            frac__ = count.astype('float') / count.sum()
+            Omega__ = count.astype('float') / count0
+
+        frac[counter:counter+gmm0.K] = frac__
+        Omega[counter:counter+gmm0.K] = Omega__
+        amp0[counter:counter+gmm0.K] = gmm0.amp
         count0_cube += binSample(data0, C)
 
+        # which K: K0 or K/N = const?
+        K_ = gmm0.K #int(K*omega_cube.mean())
+
         # fit model after selection
-        sel0 = sel_callback(data0)
         data = pygmmi.createShared(data0[sel0])
 
-        # which K: K0 or K/N = const?
-        K_ = K#int(K*omega_cube.mean())
+        split_n_merge = K_/3 # 0
         gmm = pygmmi.GMM(K=K_, D=3)
-        pygmmi.fit(gmm, data, init_callback=pygmmi.initFromDataAtRandom, w=w, cutoff=3, split_n_merge=K_/3, rng=rng)
+        init_cb = partial(pygmmi.initFromDataMinMax, s=0.5, rng=rng)
+        logL, U = pygmmi.fit(gmm, data, init_callback=init_cb, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
         sample = gmm.draw(N, rng=rng)
         count_cube += binSample(sample, C)
 
         fit_forever = try_forever(pygmmi.fit)
         gmm_ = pygmmi.GMM(K=K_, D=3)
-        #fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=pygmmi.initFromDataAtRandom, w=w, cutoff=5, rng=rng)
+        #fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=init_cb, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
-        gmm_.covar[:,:,:] = 4*gmm.covar[:,:,:]
-        fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=dummy_init, w=w, cutoff=3, split_n_merge=K_/3, rng=rng)
-        sample = gmm_.draw(N, rng=rng)
-        count__cube += binSample(sample, C)
+        gmm_.covar[:,:,:] = 2*gmm.covar[:,:,:]
+        logL_, U_ = fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=None, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
+        sample_ = gmm_.draw(N, rng=rng)
+        """
+        gmm_ = gmm
+        logL_, U_ = logL, U
+        sample_ = sample
+        """
+
+        count__cube += binSample(sample_, C)
 
         # find density threshold to be associated with any fit GMM component:
         # below a threshold, the EM algorithm won't bother to put a component.
         # under selection, that threshold applies to the observed sample.
         #
         # 1) compute fraction of observed points for each component of gmm0
-        comp0 = np.empty(len(data0), dtype='uint32')
-        for k in xrange(gmm0.K):
-            comp0[nbh0[k]] = k
-        comp = comp0[sel0]
-        count0 = np.bincount(comp0, minlength=gmm0.K)
-        count = np.bincount(comp, minlength=gmm0.K)
-        frac[r*K:(r+1)*K] = count.astype('float') / count.sum()
-        Omega[r*K:(r+1)*K] = count.astype('float') / count0
+        for k in xrange(K_):
+            # select data that is within cutoff of any component of sel_gmm
+            sel__ = GMMSel(data0[nbh0[k]], gmm=None, sel_gmm=gmm_, cutoff_nd=cutoff_nd, rng=rng)
+            assoc_frac[k + counter] = sel__.sum() * 1./ nbh0[k].size
 
+        """
         # 2) test which components have majority of points associated with
         # any fit component
-        cutoff = 1
-        import scipy.stats
-        cdf_1d = scipy.stats.norm.cdf(cutoff)
-        confidence_1d = 1-(1-cdf_1d)*2
-        for k in xrange(K):
-            # select data that is within cutoff of any component of sel_gmm
-            sel__ = GMMSel(data0[nbh0[k]], gmm=None, sel_gmm=gmm_, cutoff=cutoff, rng=rng)
-            assoc_frac[k + r*K] = sel__.sum() * 1./ nbh0[k].size
+        max_k = max_posterior(gmm, U, data0)
+        for k in xrange(K_):
+            posterior[k + counter] = np.bincount(max_k[comp0 == k]).max() * 1./ (comp0 == k).sum()
+        """
 
+        counter += gmm0.K
 
     # plot average cell density as function of cell omega:
     # biased estimate will avoid low-omega region and (over)compensate in
@@ -241,18 +312,22 @@ if __name__ == "__main__":
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    ax.plot(bins, np.zeros_like(bins), 'k:')
-    ax.plot([0,1], [-1,1], 'k--')
+    ax.plot(bins, np.zeros_like(bins), 'k--')
+    ax.plot([0,1], [-1,1], 'k:')
     ax.errorbar(mean_omega, (mean_rho - mean_rho0)/mean_rho0, yerr=np.sqrt(std_rho**2 + std_rho0**2)/mean_rho0, fmt='b-')
     ax.errorbar(mean_omega, (mean_rho_ - mean_rho0)/mean_rho0, yerr=np.sqrt(std_rho_**2 + std_rho0**2)/mean_rho0, fmt='r-')
     ax.set_xlabel('$\Omega$')
     fig.show()
 
-
     # plot associated fraction vs observed amplitude
+    import scipy.stats
+    cdf_1d = scipy.stats.norm.cdf(inner_cutoff)
+    confidence_1d = 1-(1-cdf_1d)*2
+
+    """
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    sc = ax.scatter(frac, assoc_frac, c=Omega, s=100*amp0/amp0.mean(), marker='o')
+    sc = ax.scatter(frac[:counter], assoc_frac[:counter], c=Omega[:counter], s=100*amp0[:counter]/amp0[:counter].mean(), marker='o')
     xl = ax.get_xlim()
     yl = [0,1.05]
     ax.plot(yl, [confidence_1d, confidence_1d], c='#888888', ls='--')
@@ -263,3 +338,30 @@ if __name__ == "__main__":
     cb = plt.colorbar(sc, ax=ax)
     cb.set_label('$\Omega$')
     fig.show()
+    """
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    sc = ax.scatter(amp0[:counter]*Omega[:counter], assoc_frac[:counter], c=Omega[:counter], s=100*amp0[:counter]/amp0[:counter].mean(), marker='o')
+    xl = ax.get_xlim()
+    yl = [0,1.05]
+    ax.plot(yl, [confidence_1d, confidence_1d], c='#888888', ls='--')
+    ax.plot([Omega[:counter].mean()/gmm0.K, Omega[:counter].mean()/gmm0.K], yl, 'k:')
+    ax.set_xlim(xmin=-0.005, xmax=xl[1])
+    ax.set_ylim(yl)
+    ax.set_xlabel(r'$\alpha_k \Omega_k$')
+    ax.set_ylabel('ASSOC')
+    cb = plt.colorbar(sc, ax=ax)
+    cb.set_label('$\Omega$')
+    fig.show()
+
+    ax = plotPoints(data0, s=1, alpha=0.5)
+    for k in xrange(gmm0.K):
+        ax.text(gmm0.mean[k,0]+0.03, gmm0.mean[k,1]+0.03, gmm0.mean[k,2]+0.03, "%d" % k, color='k', zorder=1000)
+    plotPoints(gmm0.mean, c='g', s=400, ax=ax, alpha=0.5, zorder=100)
+
+    ax = plotPoints(sample_, s=1, alpha=0.5)
+    for k in xrange(gmm0.K):
+        ax.text(gmm_.mean[k,0]+0.03, gmm_.mean[k,1]+0.03, gmm_.mean[k,2]+0.03, "%d" % k, color='r', zorder=1000)
+    plotPoints(gmm0.mean, c='g', s=400, ax=ax, alpha=0.5, zorder=100)
+    plotPoints(gmm_.mean, c='r', s=400, ax=ax, alpha=0.5, zorder=100)

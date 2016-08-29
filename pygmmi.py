@@ -773,6 +773,8 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, U=None, covar_reduce_fct=n
     # since components may overlap, simply using component2 is insufficient.
     # for the sake of speed, we simply add all points whose components overlap
     # with the one in question
+    # FIXME: This method does not account for added noise that could "connect"
+    # two otherwise disjoint components.
     U2 = [None for k in xrange(gmm.K)]
     for k in xrange(gmm.K):
         overlap_k = _overlappingWith(k, gmm, cutoff=cutoff)
