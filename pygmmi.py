@@ -275,6 +275,40 @@ class GMM(object):
         log2piD2 = np.log(2*np.pi)*(0.5*self.D)
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
+class Background(object):
+    def __init__(self, D=1):
+        self.amp = 0
+        self.D = D
+        self.V = None
+
+    @property
+    def p(self):
+        if self.V is not None:
+            return 1./self.V
+        else:
+            raise RuntimeError("Background.p: volume V not set!")
+
+    def computeVolume(self, data, sel_callback=None, sel_B=10, sel_over=10, rng=np.random):
+        # volumne spanned by data
+        min_pos = data.min(axis=0)
+        max_pos = data.max(axis=0)
+        delta_pos = max_pos - min_pos
+
+        # limit to observed subvolume
+        if sel_callback is None:
+            self.V = np.prod(delta_pos)
+        else:
+            # divide range into B cells per dimensions
+            N_cells = sel_B**3
+            N_samples = N_cells * sel_over
+            samples = delta_pos * rng.rand(N_samples, self.D) + min_pos
+            sel = sel_callback(samples)
+            histdd = np.histogramdd(samples[sel], sel_B)[0]
+            filled = np.flatnonzero(histdd).size
+            # multiply with volume of each cell
+            vol_cell = np.prod(delta_pos/sel_B)
+            self.V = filled * vol_cell
+        return self.V
 
 ############################
 # Begin of fit functions
@@ -326,9 +360,9 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 # Run a simple GMM to initialize a tricky one:
-def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, tol=1e-3, covar_factor=1.):
+def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, background=None, tol=1e-3, covar_factor=1.):
     # 1) run GMM without error and selection (fit is essentially an init fct)
-    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, tol=tol, rng=rng)
+    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, background=background, tol=tol, rng=rng)
     # 2) adjust the covariance to allow to provide more support
     # in missing volume
     gmm.covar[:,:,:] *= covar_factor
@@ -344,7 +378,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=None, tol=1e-3, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=None, background=None, tol=1e-3, split_n_merge=False, rng=np.random):
 
     # init components
     if init_callback is not None:
@@ -358,8 +392,10 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     # sum_k p(x|k) -> S
     # extra precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
-    log_S = np.zeros(len(data))           # S = sum_k p(x|k)
-    H = np.zeros(len(data), dtype='bool') # H == 1 for points in the fit
+    log_S = createShared(np.zeros(len(data)))  # S = sum_k p(x|k)
+    # FIXME: create sheared boolean array results in
+    # AttributeError: 'c_bool' object has no attribute '__array_interface__'
+    H = np.zeros(len(data), dtype='bool')      # H == 1 for points in the fit
     log_p = [[] for k in xrange(gmm.K)]   # P = p(x|k) for x in U[k]
     T_inv = [None for k in xrange(gmm.K)] # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]     # U = {x close to k}
@@ -367,7 +403,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     if VERBOSITY:
         global VERB_BUFFER
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, rng=rng)
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
@@ -388,9 +424,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         _update_snm(gmm, altered, U, N+N2, cleanup)
 
         # run partial EM on altered components
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
 
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, tol=tol, prefix="SNM_F", altered=None, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", altered=None, rng=rng)
 
         if log_L >= log_L_:
             # revert to backup
@@ -408,7 +444,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     pool.close()
     return log_L, U
 
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -434,7 +470,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
     gmm_.covar[:,:,:] = gmm.covar[:,:,:]
     while it < maxiter: # limit loop in case of slow convergence
 
-        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
+        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -479,8 +515,46 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0
     return log_L, N, N2
 
 
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
     import parmap
+
+    # determine which points belong to background:
+    # compare uniform background model with GMM
+    # points not in any U[k] have S[i] == 0 and are thus guaranteed background
+    if it > 0  and background is not None:
+        p_bg = background.amp * background.p
+        need_missing_p = False
+        if H.sum() != len(data):
+            for k in xrange(gmm.K):
+                if U[k] is not None:
+                    need_missing_p = True
+                    break
+            if it % 3 == 0:
+                need_missing_p = True
+        if need_missing_p:
+            if covar is None or covar.shape == (gmm.D, gmm.D):
+                covar_missing = covar
+            else:
+                covar_missing = covar[~H]
+            log_S[~H] = gmm(data[~H], covar=covar_missing, as_log=True)
+            print log_S[H].mean(), log_S[~H].mean()
+            log_S = np.exp(log_S)
+        else:
+            log_S[H] = np.exp(log_S[H])
+        q_bg = p_bg / np.maximum(p_bg + (1-background.amp)*log_S, 1e-15) # to prevent outliers from 0/0
+        H[:] = q_bg < 0.5
+        # recompute background amplitude;
+        # for flat log_S, this is identical to summing up samplings with H[i]==0
+        background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
+        print "BG:", background.amp, (H==0).sum()
+        """raise SystemExit"""
+        # remove bg points from U[k] that or not in H:
+        # select those from U with H[U] == True
+        for k in xrange(gmm.K):
+            if U[k] is not None:
+                U[k] = U[k][H[U[k]]]
+            else:
+                U[k] = np.flatnonzero(H)
 
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
