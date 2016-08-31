@@ -455,8 +455,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, bac
         # These differing conventions need to be documented well.
         cutoff_nd = chi2_cutoff(gmm.D, cutoff=cutoff)
 
-    # store chi2 cutoff for component shifts, use 0.5 sigma
-    shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.5, cutoff/2))
+        # store chi2 cutoff for component shifts, use 0.5 sigma
+        shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.5, cutoff/2))
+    else:
+        cutoff_nd = None
+        shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.5)
 
     it = 0
     maxiter = max(100, gmm.K)
@@ -522,32 +525,37 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     # determine which points belong to background:
     # compare uniform background model with GMM
     # points not in any U[k] have S[i] == 0 and are thus guaranteed background
-    if it > 0  and background is not None:
-        p_bg = background.amp * background.p
+    if background is not None and it > 0:
+        need_missing_p = True
+        """
         need_missing_p = False
         if H.sum() != len(data):
             for k in xrange(gmm.K):
                 if U[k] is not None:
                     need_missing_p = True
                     break
+        """
         if need_missing_p:
             if covar is None or covar.shape == (gmm.D, gmm.D):
                 covar_missing = covar
             else:
                 covar_missing = covar[~H]
             log_S[~H] = gmm(data[~H], covar=covar_missing, as_log=True)
-            print log_S[H].mean(), log_S[~H].mean()
             log_S = np.exp(log_S)
         else:
             log_S[H] = np.exp(log_S[H])
+        """
+        log_S[H] = np.exp(log_S[H])
+        """
+        p_bg = background.amp * background.p
         q_bg = p_bg / np.maximum(p_bg + (1-background.amp)*log_S, 1e-15) # to prevent outliers from 0/0
         H[:] = q_bg < 0.5
+
         # recompute background amplitude;
         # for flat log_S, this is identical to summing up samplings with H[i]==0
         if background.adjust_amp:
             background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
         print "BG:", background.amp, (H==0).sum()
-        """raise SystemExit"""
         # remove bg points from U[k] that or not in H:
         # select those from U with H[U] == True
         for k in xrange(gmm.K):
@@ -581,8 +589,13 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     # Effectively, partial runs are as expensive as full runs.
 
     # need log(S), but since log(0) isn't a good idea, need to restrict to N_
-    log_S[H] = np.log(log_S[H])
-    log_L_ = log_S[H].mean()
+    if background is None:
+        log_S[H] = np.log(log_S[H])
+        log_L_ = log_S[H].mean()
+    else:
+        log_L_ = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
+        log_S[H] = np.log(log_S[H])
+
     N = H.sum()
 
     # perform M step with M-sums of data and imputations runs
