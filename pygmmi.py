@@ -280,6 +280,7 @@ class Background(object):
         self.amp = 0
         self.D = D
         self.V = None
+        self.adjust_amp = True
 
     @property
     def p(self):
@@ -529,8 +530,6 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
                 if U[k] is not None:
                     need_missing_p = True
                     break
-            if it % 3 == 0:
-                need_missing_p = True
         if need_missing_p:
             if covar is None or covar.shape == (gmm.D, gmm.D):
                 covar_missing = covar
@@ -545,7 +544,8 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         H[:] = q_bg < 0.5
         # recompute background amplitude;
         # for flat log_S, this is identical to summing up samplings with H[i]==0
-        background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
+        if background.adjust_amp:
+            background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
         print "BG:", background.amp, (H==0).sum()
         """raise SystemExit"""
         # remove bg points from U[k] that or not in H:

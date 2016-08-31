@@ -282,7 +282,7 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("cut", rng=rng)
+    cb, ps = getSelection("none", rng=rng)
 
     # add isotropic errors on data
     disp = 0.01
@@ -290,7 +290,7 @@ if __name__ == '__main__':
 
     # uniform noise distribution as background
     bg_amp = 0.5
-    bg_sample = -5 + 20*rng.rand(int(bg_amp*N),D)
+    bg_sample = -5 + 20*rng.rand(int(bg_amp*N/(1-bg_amp)),D)
 
     # apply selection
     sel = cb(noisy, gmm)
@@ -302,6 +302,7 @@ if __name__ == '__main__':
     bg_amp = sel_bg.sum() * 1./ (sel.sum() + sel_bg.sum())
     bg = pygmmi.Background(D=D)
     bg.amp = bg_amp
+    bg.adjust_amp = True
     bg.computeVolume(data, sel_callback=cb)
 
     # plot data vs true model
@@ -309,9 +310,10 @@ if __name__ == '__main__':
 
     # repeated runs: store results and logL
     K = 3
-    R = 10
+    R = 1
     gmm_ = pygmmi.GMM(K=K, D=D)
     avg = pygmmi.GMM(K=K*R, D=D)
+    bg_amps = np.empty(R)
     l = np.empty(R)
 
     # 1) run without imputation, ignoring errors
@@ -325,11 +327,13 @@ if __name__ == '__main__':
         gmm_.mean[:,1] += rng.normal(loc=0, scale=1, size=gmm.K)
         gmm_.covar[:,:,:] = 10*np.eye(gmm.D)
         pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
         #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, background=bg, rng=rng, split_n_merge=0)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
         avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+        bg_amps[r] = bg.amp
     avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)

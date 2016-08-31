@@ -291,7 +291,7 @@ if __name__ == '__main__':
 
     # repeated runs: store results and logL
     K = 3
-    R = 10
+    R = 1
     gmm_ = pygmmi.GMM(K=K, D=D)
     avg = pygmmi.GMM(K=K*R, D=D)
     l = np.empty(R)
@@ -300,7 +300,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, rng=rng)
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
