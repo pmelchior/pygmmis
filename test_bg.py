@@ -282,14 +282,14 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("none", rng=rng)
+    cb, ps = getSelection("cut", rng=rng)
 
     # add isotropic errors on data
     disp = 0.01
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
 
     # uniform noise distribution as background
-    bg_amp = 0.3
+    bg_amp = 0.1
     bg_sample = -5 + 20*rng.rand(int(bg_amp*N/(1-bg_amp)),D)
 
     # apply selection
@@ -322,17 +322,7 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     for r in xrange(R):
         bg.amp = bg_amp
-        """
-        gmm_.amp[:] = 1./gmm.K
-        gmm_.mean[:,:] = gmm.mean[:,:]
-        gmm_.mean[:,0] += rng.normal(loc=0, scale=1, size=gmm.K)
-        gmm_.mean[:,1] += rng.normal(loc=0, scale=1, size=gmm.K)
-        gmm_.covar[:,:,:] = 10*np.eye(gmm.D)
-        """
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, background=bg, rng=rng, split_n_merge=0)
-        #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
-        #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
-        #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, background=bg, rng=rng, split_n_merge=0)
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, background=bg, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -341,8 +331,8 @@ if __name__ == '__main__':
     avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)
-    """
-    # 3) run with imputation, igoring errors
+
+    # 2) run with imputation, igoring errors
     # We need a better init function to allow the model to
     # start from a good initial location and to explore the
     # volume that is spanned by the missing part of the data
@@ -377,4 +367,3 @@ if __name__ == '__main__':
     plotResults(orig, data, avg, l, patch=ps)
     #plotDifferences(orig, data, avg, R, l, patch=ps)
     #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
-    """

@@ -555,39 +555,25 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     # compare uniform background model with GMM
     # points not in any U[k] have S[i] == 0 and are thus guaranteed background
     else:
-        """
-        need_missing_p = True
-        need_missing_p = False
-        if H.sum() != len(data):
-            for k in xrange(gmm.K):
-                if U[k] is not None:
-                    need_missing_p = True
-                    break
-        if need_missing_p:
-            if covar is None or covar.shape == (gmm.D, gmm.D):
-                covar_missing = covar
-            else:
-                covar_missing = covar[~H]
-            log_S[~H] = gmm(data[~H], covar=covar_missing, as_log=True)
-            log_S = np.exp(log_S)
+        if it == 0:
+            log_S[:] = gmm(data, covar=covar)
         else:
-            log_S[H] = np.exp(log_S[H])
-        """
-        if it > 0:
-            p_bg = background.amp * background.p
             log_S[:] = np.exp(log_S[:])
-            q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
-            H[:] = q_bg < 0.5
 
-            # recompute background amplitude;
-            # for flat log_S, this is identical to summing up samplings with H[i]==0
-            if background.adjust_amp:
-                background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
-            print "BG:", background.amp, (H==0).sum()
+            # reset signal U
             for k in xrange(gmm.K):
                 U[k] = None
-        else:
-            H[:] = 1
+
+        p_bg = background.amp * background.p
+        q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
+        H[:] = q_bg < 0.5
+
+        # recompute background amplitude;
+        # for flat log_S, this is identical to summing up samplings with H[i]==0
+        if background.adjust_amp:
+            background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
+        print "BG:", background.amp, (H==0).sum()
+
         # don't use cutoff and don't update H:
         # log_S is correctly computed with all i and k
         # for the signal part: set U[k] = H to prevent background samples
