@@ -1,4 +1,4 @@
-import pygmmi
+import pygmmis
 import numpy as np
 from functools import partial
 
@@ -119,7 +119,7 @@ def max_posterior(gmm, U, coords, covar=None):
     H = np.zeros(len(coords), dtype="bool")
     k = 0
     for log_p[k], U[k], _ in \
-    parmap.starmap(pygmmi._Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+    parmap.starmap(pygmmis._Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
         log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
         H[U[k]] = 1
         k += 1
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     seed = 42#np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pygmmi.VERBOSITY = 1
+    pygmmis.VERBOSITY = 1
 
     # define selection and create Omega in cube:
     # expensive, only do once
@@ -180,12 +180,12 @@ if __name__ == "__main__":
     assoc_frac = np.empty(R*K)
     posterior = np.empty(R*K)
 
-    cutoff_nd = pygmmi.chi2_cutoff(D, cutoff=inner_cutoff)
+    cutoff_nd = pygmmis.chi2_cutoff(D, cutoff=inner_cutoff)
     counter = 0
     for r in xrange(R):
         print "start"
         # create original sample from GMM
-        gmm0 = pygmmi.GMM(K=K, D=D)
+        gmm0 = pygmmis.GMM(K=K, D=D)
         initCube(gmm0, w=w*10, rng=rng) # use larger size floor than in fit
         data0, nbh0 = drawWithNbh(gmm0, N, rng=rng)
 
@@ -239,17 +239,17 @@ if __name__ == "__main__":
         K_ = gmm0.K #int(K*omega_cube.mean())
 
         # fit model after selection
-        data = pygmmi.createShared(data0[sel0])
+        data = pygmmis.createShared(data0[sel0])
 
         split_n_merge = K_/3 # 0
-        gmm = pygmmi.GMM(K=K_, D=3)
-        init_cb = partial(pygmmi.initFromDataMinMax, s=0.5, rng=rng)
-        logL, U = pygmmi.fit(gmm, data, init_callback=init_cb, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
+        gmm = pygmmis.GMM(K=K_, D=3)
+        init_cb = partial(pygmmis.initFromDataMinMax, s=0.5, rng=rng)
+        logL, U = pygmmis.fit(gmm, data, init_callback=init_cb, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
         sample = gmm.draw(N, rng=rng)
         count_cube += binSample(sample, C)
 
-        fit_forever = try_forever(pygmmi.fit)
-        gmm_ = pygmmi.GMM(K=K_, D=3)
+        fit_forever = try_forever(pygmmis.fit)
+        gmm_ = pygmmis.GMM(K=K_, D=3)
         #fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=init_cb, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]

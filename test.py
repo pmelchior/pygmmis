@@ -1,6 +1,6 @@
 #!/bin/env python
 
-import pygmmi
+import pygmmis
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -80,7 +80,7 @@ def plotDifferences(orig, data, gmm, R, l, patch=None):
     p = np.empty((R,B,B))
     for r in xrange(R):
         comps = np.arange(r*K, (r+1)*K)
-        gmm_ = pygmmi.GMM(K=K, D=gmm.D)
+        gmm_ = pygmmis.GMM(K=K, D=gmm.D)
         gmm_.amp[:] = gmm.amp[comps]
         gmm_.amp /= gmm_.amp.sum()
         gmm_.mean[:,:] = gmm.mean[comps,:]
@@ -163,7 +163,7 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=5, rotate=True):
             inv_sel = sel == False
             coverage[sel] += 1./repeat
 
-            gmm_ = pygmmi.GMM(K=gmm.K, D=gmm.D)
+            gmm_ = pygmmis.GMM(K=gmm.K, D=gmm.D)
             gmm_.amp = np.random.rand(K)
             gmm_.amp /= gmm_.amp.sum()
             gmm_.covar = gmm.covar
@@ -253,14 +253,14 @@ if __name__ == '__main__':
     seed = 3373 # 8422 # np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pygmmi.VERBOSITY = 1
+    pygmmis.VERBOSITY = 1
     w = 0.1
     cutoff = 5
 
     # draw N points from 3-component GMM
     N = 400
     D = 2
-    gmm = pygmmi.GMM(K=3, D=2)
+    gmm = pygmmis.GMM(K=3, D=2)
     gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
     gmm.amp /= gmm.amp.sum()
     gmm.mean[:,:] = np.array([[ 0.08016886,  0.21300697],
@@ -283,7 +283,7 @@ if __name__ == '__main__':
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy, gmm)
-    data = pygmmi.createShared(noisy[sel])
+    data = pygmmis.createShared(noisy[sel])
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
@@ -292,15 +292,15 @@ if __name__ == '__main__':
     # repeated runs: store results and logL
     K = 3
     R = 1
-    gmm_ = pygmmi.GMM(K=K, D=D)
-    avg = pygmmi.GMM(K=K*R, D=D)
+    gmm_ = pygmmis.GMM(K=K, D=D)
+    avg = pygmmis.GMM(K=K*R, D=D)
     l = np.empty(R)
 
     # 1) run without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, rng=rng)
+        pygmmis.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmis.initFromDataAtRandom, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -314,7 +314,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
+        pygmmis.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -330,11 +330,11 @@ if __name__ == '__main__':
     # volume that is spanned by the missing part of the data
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(pygmmi.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
+    init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmis.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -347,7 +347,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmi.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
