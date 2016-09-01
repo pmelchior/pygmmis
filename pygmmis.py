@@ -378,12 +378,29 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
             k_ -= set([k])
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
+# initialize from k-means clusters
+# use Algorithm 1 from Bloemer & Bujna (arXiv:1312.5946)
+def initFromKMeans(gmm, data, covar=None, rng=np.random):
+    from scipy.cluster.vq import kmeans2
+    center, label = kmeans2(data, gmm.K)
+    for k in xrange(gmm.K):
+        mask = (label == k)
+        gmm.amp[k] = mask.sum() * 1./len(data)
+        gmm.mean[k,:] = data[mask].mean(axis=0)
+        d_m = data[mask] - gmm.mean[k]
+        # funny way of saying: for each point i, do the outer product
+        # of d_m with its transpose and sum over i
+        gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
+
 
 def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=None, background=None, tol=1e-3, split_n_merge=False, rng=np.random):
+    # NOTE: If background is set, it implies cutoff=None
 
     # init components
     if init_callback is not None:
         init_callback(gmm, data=data, covar=covar, rng=rng)
+    elif VERBOSITY:
+        print "forgoing initialization. hopefully GMM was initialized..."
 
     # set up pool
     import multiprocessing
@@ -534,7 +551,6 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     import parmap
 
     if background is None:
-
         # compute p(i | k) for each k independently in the pool
         # need S = sum_k p(i | k) for further calculation
         # also N = {i | i in neighborhood[k]} for any k
@@ -552,8 +568,11 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         log_L_ = log_S[H].mean()
 
     # determine which points belong to background:
-    # compare uniform background model with GMM
-    # points not in any U[k] have S[i] == 0 and are thus guaranteed background
+    # compare uniform background model with GMM,
+    # use H to store association to signal vs background
+    # that decision conflicts with per-component U's, which also underestimates
+    # the probabilities under the signal model.
+    # Thus, we ignore any cutoff and compute p(x|k) for all x and k
     else:
         if it == 0:
             log_S[:] = gmm(data, covar=covar)
@@ -569,16 +588,14 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         # for flat log_S, this is identical to summing up samplings with H[i]==0
         if background.adjust_amp:
             background.amp = q_bg.sum() / len(data)
-        print "BG:", background.amp, (H==0).sum(), np.median(q_bg)
+        print "BG:", background.amp, (H==0).sum(), np.median(q_bg), (log_S > 0).all()
 
         # reset signal U
         for k in xrange(gmm.K):
             U[k] = None
 
         # don't use cutoff and don't update H:
-        # log_S is correctly computed with all i and k
-        # for the signal part: set U[k] = H to prevent background samples
-        # to affect M-step.
+        # for the signal part: set U[k] = H for the M-step
         k = 0
         log_S[:] = 0
         for log_p[k], U[k], T_inv[k] in \
