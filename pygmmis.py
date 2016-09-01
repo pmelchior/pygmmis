@@ -560,9 +560,6 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         else:
             log_S[:] = np.exp(log_S[:])
 
-            # reset signal U
-            for k in xrange(gmm.K):
-                U[k] = None
 
         p_bg = background.amp * background.p
         q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
@@ -571,8 +568,12 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         # recompute background amplitude;
         # for flat log_S, this is identical to summing up samplings with H[i]==0
         if background.adjust_amp:
-            background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
-        print "BG:", background.amp, (H==0).sum()
+            background.amp = q_bg.sum() / len(data)
+        print "BG:", background.amp, (H==0).sum(), np.median(q_bg)
+
+        # reset signal U
+        for k in xrange(gmm.K):
+            U[k] = None
 
         # don't use cutoff and don't update H:
         # log_S is correctly computed with all i and k
