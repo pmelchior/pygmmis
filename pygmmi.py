@@ -425,6 +425,17 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         _update_snm(gmm, altered, U, N+N2, cleanup)
 
         # run partial EM on altered components
+        # NOTE: for a partial run, we'd only need the change to Log_S from the
+        # altered components. However, the neighborhoods can change from _update_snm
+        # or because they move, so that operation is ill-defined.
+        # Thus, we'll always run a full E-step, which is pretty cheap for
+        # converged neighborhood.
+        # The M-step could in principle be run on the altered components only,
+        # but there seem to be side effects in what I've tried.
+        # Similar to the E-step, the imputation step needs to be run on all
+        # components, otherwise the contribution of the altered ones to the mixture
+        # would be over-estimated.
+        # Effectively, partial runs are as expensive as full runs.
         log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
 
         log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", altered=None, rng=rng)
@@ -522,19 +533,36 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, bac
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
     import parmap
 
+    if background is None:
+
+        # compute p(i | k) for each k independently in the pool
+        # need S = sum_k p(i | k) for further calculation
+        # also N = {i | i in neighborhood[k]} for any k
+        log_S[:] = 0
+        H[:] = 0
+        k = 0
+        for log_p[k], U[k], T_inv[k] in \
+        parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+            log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
+            H[U[k]] = 1
+            k += 1
+
+        # need log(S), but since log(0) isn't a good idea, need to restrict to N_
+        log_S[H] = np.log(log_S[H])
+        log_L_ = log_S[H].mean()
+
     # determine which points belong to background:
     # compare uniform background model with GMM
     # points not in any U[k] have S[i] == 0 and are thus guaranteed background
-    if background is not None and it > 0:
-        need_missing_p = True
+    else:
         """
+        need_missing_p = True
         need_missing_p = False
         if H.sum() != len(data):
             for k in xrange(gmm.K):
                 if U[k] is not None:
                     need_missing_p = True
                     break
-        """
         if need_missing_p:
             if covar is None or covar.shape == (gmm.D, gmm.D):
                 covar_missing = covar
@@ -545,56 +573,36 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         else:
             log_S[H] = np.exp(log_S[H])
         """
-        log_S[H] = np.exp(log_S[H])
-        """
-        p_bg = background.amp * background.p
-        q_bg = p_bg / np.maximum(p_bg + (1-background.amp)*log_S, 1e-15) # to prevent outliers from 0/0
-        H[:] = q_bg < 0.5
+        if it > 0:
+            p_bg = background.amp * background.p
+            log_S[:] = np.exp(log_S[:])
+            q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
+            H[:] = q_bg < 0.5
 
-        # recompute background amplitude;
-        # for flat log_S, this is identical to summing up samplings with H[i]==0
-        if background.adjust_amp:
-            background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
-        print "BG:", background.amp, (H==0).sum()
-        # remove bg points from U[k] that or not in H:
-        # select those from U with H[U] == True
-        for k in xrange(gmm.K):
-            if U[k] is not None:
-                U[k] = U[k][H[U[k]]]
-            else:
-                U[k] = np.flatnonzero(H)
+            # recompute background amplitude;
+            # for flat log_S, this is identical to summing up samplings with H[i]==0
+            if background.adjust_amp:
+                background.amp = q_bg.sum() / len(data) # np.exp(logsum(np.log(q_bg))) / len(data)
+            print "BG:", background.amp, (H==0).sum()
+            for k in xrange(gmm.K):
+                U[k] = None
+        else:
+            H[:] = 1
+        # don't use cutoff and don't update H:
+        # log_S is correctly computed with all i and k
+        # for the signal part: set U[k] = H to prevent background samples
+        # to affect M-step.
+        k = 0
+        log_S[:] = 0
+        for log_p[k], U[k], T_inv[k] in \
+        parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+            log_S += np.exp(log_p[k]) # actually S, not logS
+            U[k] = H # shallow copy
+            log_p[k] = log_p[k][H]
+            k += 1
 
-    # compute p(i | k) for each k independently in the pool
-    # need S = sum_k p(i | k) for further calculation
-    # also N = {i | i in neighborhood[k]} for any k
-    log_S[:] = 0
-    H[:] = 0
-    k = 0
-    for log_p[k], U[k], T_inv[k] in \
-    parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
-        log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
-        H[U[k]] = 1
-        k += 1
-
-    # NOTE: for a partial run, we'd only need the change to Log_S from the
-    # altered components. However, the neighborhoods can change from _update_snm
-    # or because they move, so that operation is ill-defined.
-    # Thus, we'll always run a full E-step, which is pretty cheap for
-    # converged neighborhood.
-    # The M-step could in principle be run on the altered components only,
-    # but there seem to be side effects in what I've tried.
-    # Similar to the E-step, the imputation step needs to be run on all
-    # components, otherwise the contribution of the altered ones to the mixture
-    # would be over-estimated.
-    # Effectively, partial runs are as expensive as full runs.
-
-    # need log(S), but since log(0) isn't a good idea, need to restrict to N_
-    if background is None:
-        log_S[H] = np.log(log_S[H])
-        log_L_ = log_S[H].mean()
-    else:
         log_L_ = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
-        log_S[H] = np.log(log_S[H])
+        log_S[:] = np.log(log_S[:])
 
     N = H.sum()
 
@@ -628,9 +636,6 @@ def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
     if cutoff is not None:
         indices = chi2 < cutoff
         if indices.any():
-            # if all indices are used: probably time to increase U
-            if indices.all():
-                changed = 0
             chi2 = chi2[indices]
             if covar is not None and covar.shape != (gmm.D, gmm.D):
                 T_inv_k = T_inv_k[indices]

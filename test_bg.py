@@ -256,12 +256,12 @@ def getSelection(type="hole", rng=np.random):
 if __name__ == '__main__':
 
     # set up test
-    seed = 3373#8422 # np.random.randint(1, 10000)
+    seed = 3372#8422 # np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmi.VERBOSITY = 1
     w = 0.1
-    cutoff = 3
+    cutoff = None
 
     # draw N points from 3-component GMM
     N = 400
@@ -289,7 +289,7 @@ if __name__ == '__main__':
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
 
     # uniform noise distribution as background
-    bg_amp = 0.5
+    bg_amp = 0.3
     bg_sample = -5 + 20*rng.rand(int(bg_amp*N/(1-bg_amp)),D)
 
     # apply selection
@@ -303,10 +303,11 @@ if __name__ == '__main__':
     bg = pygmmi.Background(D=D)
     bg.amp = bg_amp
     bg.adjust_amp = True
-    bg.computeVolume(data, sel_callback=cb)
+    bg.V = 400
+    #bg.computeVolume(data, sel_callback=cb)
 
     # plot data vs true model
-    plotResults(orig, data, gmm, np.ones(1), patch=ps)
+    #plotResults(orig, data, gmm, np.ones(1), patch=ps)
 
     # repeated runs: store results and logL
     K = 3
@@ -321,13 +322,16 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     for r in xrange(R):
         bg.amp = bg_amp
+        """
         gmm_.amp[:] = 1./gmm.K
         gmm_.mean[:,:] = gmm.mean[:,:]
         gmm_.mean[:,0] += rng.normal(loc=0, scale=1, size=gmm.K)
         gmm_.mean[:,1] += rng.normal(loc=0, scale=1, size=gmm.K)
         gmm_.covar[:,:,:] = 10*np.eye(gmm.D)
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
-        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
+        """
+        pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, background=bg, rng=rng, split_n_merge=0)
+        #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
+        #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, background=bg, rng=rng, split_n_merge=0)
         #pygmmi.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmi.initFromDataAtRandom, background=bg, rng=rng, split_n_merge=0)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
