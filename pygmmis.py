@@ -380,6 +380,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
 
 # initialize from k-means clusters
 # use Algorithm 1 from Bloemer & Bujna (arXiv:1312.5946)
+# NOTE: results not deterministic
 def initFromKMeans(gmm, data, covar=None, rng=np.random):
     from scipy.cluster.vq import kmeans2
     center, label = kmeans2(data, gmm.K)

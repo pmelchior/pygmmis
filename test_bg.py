@@ -256,7 +256,7 @@ def getSelection(type="hole", rng=np.random):
 if __name__ == '__main__':
 
     # set up test
-    seed = 3373#8422 # np.random.randint(1, 10000)
+    seed = 1060#np.random.randint(1, 10000)#3373#8422
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmis.VERBOSITY = 1
@@ -282,10 +282,10 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("cut", rng=rng)
+    cb, ps = getSelection("tapered", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.1
+    disp = 0.01
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
 
     # uniform noise distribution as background
@@ -311,7 +311,7 @@ if __name__ == '__main__':
 
     # repeated runs: store results and logL
     K = 3
-    R = 10
+    R = 1
     gmm_ = pygmmis.GMM(K=K, D=D)
     avg = pygmmis.GMM(K=K*R, D=D)
     bg_amps = np.empty(R)
@@ -322,7 +322,7 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     for r in xrange(R):
         bg.amp = bg_amp
-        pygmmis.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmis.initFromDataAtRandom, background=bg, rng=rng)
+        pygmmis.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmis.initFromKMeans, background=bg, rng=rng, split_n_merge=0)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -338,7 +338,7 @@ if __name__ == '__main__':
     # volume that is spanned by the missing part of the data
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., background=bg)
+    init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., background=bg, init_callback=pygmmis.initFromKMeans)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
@@ -351,7 +351,7 @@ if __name__ == '__main__':
     avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)
-
+    raise
     # 4) run with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)

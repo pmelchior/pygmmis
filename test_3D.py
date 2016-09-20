@@ -80,10 +80,9 @@ def plotPoints(coords, ax=None, depth_shading=True, **kwargs):
     if ax is None:
         fig, ax = createFigure()
 
-    lw = 0
     #if ecolor != 'None':
     #    lw = 0.25
-    sc = ax.scatter(coords[:,0], coords[:,1], coords[:,2], linewidths=lw, **kwargs)
+    sc = ax.scatter(coords[:,0], coords[:,1], coords[:,2], **kwargs)
     # get rid of pesky depth shading in absence of depthshade=False option
     if depth_shading is False:
         sc.set_edgecolors = sc.set_facecolors = lambda *args:None
@@ -206,7 +205,7 @@ if __name__ == "__main__":
         Omega__ = count.astype('float') / count0
 
         # restrict to "safe" components
-        safe = frac__ >=  0#1./2 * 1./ K
+        safe = frac__ >  1./1 * 1./ K
         if safe.sum() < gmm0.K:
             print "reset to safe components"
             gmm0.amp = gmm0.amp[safe]
@@ -310,13 +309,22 @@ if __name__ == "__main__":
         mean_rho_[i] = count__cube[mask].mean()
         std_rho_[i] = count__cube[mask].std() / sqrtN
 
+"""
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    ax.plot(bins, np.zeros_like(bins), 'k--')
-    ax.plot([0,1], [-1,1], 'k:')
-    ax.errorbar(mean_omega, (mean_rho - mean_rho0)/mean_rho0, yerr=np.sqrt(std_rho**2 + std_rho0**2)/mean_rho0, fmt='b-')
-    ax.errorbar(mean_omega, (mean_rho_ - mean_rho0)/mean_rho0, yerr=np.sqrt(std_rho_**2 + std_rho0**2)/mean_rho0, fmt='r-')
+    ax.plot(bins, np.zeros_like(bins), ls='--', c='#888888')
+    ax.plot([0,1], [-1,1], ls='--', c='#888888')
+    angle = 36
+    ax.text(0.30, -1+0.47, 'uncorrected $\Omega$', color='#888888', ha='center', va='center', rotation=angle)
+    ax.text(0.97, -0.05, 'perfect correction', color='#888888', ha='right', va='top')
+    ax.errorbar(mean_omega, (mean_rho - mean_rho0)/mean_rho0, yerr=np.sqrt(std_rho**2 + std_rho0**2)/mean_rho0, fmt='b-', marker='s', label='Standard EM')
+    ax.errorbar(mean_omega, (mean_rho_ - mean_rho0)/mean_rho0, yerr=np.sqrt(std_rho_**2 + std_rho0**2)/mean_rho0, fmt='r-', marker='o', label='$\mathtt{GMMis}$')
+    ax.set_ylabel(r'$(\tilde{\rho} - \rho)/\rho$')
     ax.set_xlabel('$\Omega$')
+    fig.subplots_adjust(bottom=0.12, right=0.97)
+    ax.set_xlim(0,1)
+    ax.set_ylim(-1,1)
+    leg = ax.legend(loc='upper left', frameon=False, numpoints=1)
     fig.show()
 
     # plot associated fraction vs observed amplitude
@@ -324,44 +332,44 @@ if __name__ == "__main__":
     cdf_1d = scipy.stats.norm.cdf(inner_cutoff)
     confidence_1d = 1-(1-cdf_1d)*2
 
-    """
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    sc = ax.scatter(frac[:counter], assoc_frac[:counter], c=Omega[:counter], s=100*amp0[:counter]/amp0[:counter].mean(), marker='o')
-    xl = ax.get_xlim()
-    yl = [0,1.05]
-    ax.plot(yl, [confidence_1d, confidence_1d], c='#888888', ls='--')
-    ax.plot([1./gmm0.K, 1./gmm0.K], yl, 'k:')
-    ax.set_xlim(xmin=-0.005, xmax=xl[1])
+    sc = ax.scatter(frac[:counter], assoc_frac[:counter], c=Omega[:counter], s=100*amp0[:counter]/amp0[:counter].mean(), marker='o', rasterized=True, cmap='RdYlBu')
+    xl = [-0.005, frac[:counter].max()*1.1]
+    yl = [0,1.0]
+    ax.plot(xl, [confidence_1d, confidence_1d], c='#888888', ls='--', lw=1)
+    ax.text(xl[1]*0.97, 0.68*0.97, '$1\sigma$ region', color='#888888', ha='right', va='top')
+    ax.plot([1./gmm0.K, 1./gmm0.K], yl, c='#888888', ls=':', lw=1)
+    ax.text(1./gmm0.K + (xl[1]-xl[0])*0.03, yl[0] + 0.03, '$1/K$', color='#888888', ha='left', va='bottom', rotation=90)
+    ax.set_xlim(xl)
     ax.set_ylim(yl)
     ax.set_xlabel('$N^o_k / N^o$')
-    cb = plt.colorbar(sc, ax=ax)
-    cb.set_label('$\Omega$')
-    fig.show()
-    """
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    sc = ax.scatter(amp0[:counter]*Omega[:counter], assoc_frac[:counter], c=Omega[:counter], s=100*amp0[:counter]/amp0[:counter].mean(), marker='o')
-    xl = ax.get_xlim()
-    yl = [0,1.05]
-    ax.plot(yl, [confidence_1d, confidence_1d], c='#888888', ls='--')
-    ax.plot([Omega[:counter].mean()/gmm0.K, Omega[:counter].mean()/gmm0.K], yl, 'k:')
-    ax.set_xlim(xmin=-0.005, xmax=xl[1])
-    ax.set_ylim(yl)
-    ax.set_xlabel(r'$\alpha_k \Omega_k$')
-    ax.set_ylabel('ASSOC')
-    cb = plt.colorbar(sc, ax=ax)
-    cb.set_label('$\Omega$')
+    ax.set_ylabel('$\eta_k$')
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="3%", pad=0.0)
+    cb = plt.colorbar(sc, cax=cax)
+    ticks = np.linspace(0, 1, 6)
+    cb.set_ticks(ticks)
+    cb.set_label('$\Omega_k$')
+    fig.subplots_adjust(bottom=0.13, right=0.90)
     fig.show()
 
-    ax = plotPoints(data0, s=1, alpha=0.5)
-    for k in xrange(gmm0.K):
-        ax.text(gmm0.mean[k,0]+0.03, gmm0.mean[k,1]+0.03, gmm0.mean[k,2]+0.03, "%d" % k, color='k', zorder=1000)
-    plotPoints(gmm0.mean, c='g', s=400, ax=ax, alpha=0.5, zorder=100)
+
+    cmap = matplotlib.cm.get_cmap('RdYlBu')
+    color = np.array([cmap(20),cmap(255)])[sel0.astype('int')]
+    #ecolor = np.array(['r','b'])[sel0.astype('int')]
+    ax = plotPoints(data0, s=4, c=color,lw=0,rasterized=True, depth_shading=False)
+    ax.set_xlim3d(0,1)
+    ax.set_ylim3d(0,1)
+    ax.set_zlim3d(0,1)
 
     ax = plotPoints(sample_, s=1, alpha=0.5)
     for k in xrange(gmm0.K):
         ax.text(gmm_.mean[k,0]+0.03, gmm_.mean[k,1]+0.03, gmm_.mean[k,2]+0.03, "%d" % k, color='r', zorder=1000)
     plotPoints(gmm0.mean, c='g', s=400, ax=ax, alpha=0.5, zorder=100)
     plotPoints(gmm_.mean, c='r', s=400, ax=ax, alpha=0.5, zorder=100)
+    ax.set_xlim3d(0,1)
+    ax.set_ylim3d(0,1)
+    ax.set_zlim3d(0,1)
+"""
