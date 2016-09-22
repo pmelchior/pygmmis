@@ -826,10 +826,12 @@ def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
         if covar2.shape == (gmm.D, gmm.D): # one-for-all
             noise = rng.multivariate_normal(np.zeros(gmm.D), covar2, size=len(data2))
         else:
-            # create noise from unit covariance and then dot with covar2 to get
-            # a noise distribution that follows individual covariances
+            # create noise from unit covariance and then dot with eigenvalues
+            # decomposition of covar2 to get a the right noise distribution
+            # fasther than drawing one sample per each covariance
             noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=len(data2))
-            noise = np.einsum('...ij,...j', covar2, noise)
+            val, rot = np.linalg.eigh(covar2)
+            noise = np.einsum('...ij,...j', rot, np.sqrt(val)*noise)
         data2 += noise
     else:
         covar2 = None
@@ -896,6 +898,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     # Large EV implies extended object, which often is caused by coverving
     # multiple clusters. This happes also for almost empty components, which
     # should rather be merged than split, hence amplitude weights.
+    # TODO: replace with linalg.eigvalsh, but eigenvalues are not always ordered
     EV = np.linalg.svd(gmm.covar, compute_uv=False)
     JS = EV[:,0] * gmm.amp
     split_l3 = np.argsort(JS)[-3:][::-1]
@@ -931,6 +934,7 @@ def _update_snm(gmm, altered, U, N, cleanup):
     # split 2, store in 1 and 2
     # following SVD method in Zhang 2003, with alpha=1/2, u = 1/4
     gmm.amp[altered[1]] = gmm.amp[altered[2]] = gmm.amp[altered[2]] / 2
+    # TODO: replace with linalg.eigvalsh, but eigenvalues are not always ordered
     _, radius2, rotation = np.linalg.svd(gmm.covar[altered[2]])
     dl = np.sqrt(radius2[0]) *  rotation[0] / 4
     gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
