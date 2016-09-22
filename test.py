@@ -5,16 +5,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.lines as lines
+import matplotlib.cm
 import datetime
 from functools import partial
 
-def plotResults(orig, data, gmm, l, patch=None):
+def plotResults(orig, data, gmm, l, patch=None, description=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
     # plot inner and outer points
-    ax.plot(orig[:,0], orig[:,1], 'o', mfc='r', mec='None')
-    ax.plot(data[:,0], data[:,1], 'o', mfc='b', mec='None')
+    ax.plot(orig[:,0], orig[:,1], 'o', mfc='None', mec='r', mew=1)
+    ax.plot(data[:,0], data[:,1], 's', mfc='b', mec='None')#, mew=1)
 
     # prediction
     B = 100
@@ -43,9 +44,13 @@ def plotResults(orig, data, gmm, l, patch=None):
         else:
             ax.add_artist(copy.copy(patch))
 
-    # add complete data logL to plot
+    # add description and complete data logL to plot
     logL = gmm_(orig, as_log=True).mean()
-    ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes)
+    if description is not None:
+        ax.text(0.05, 0.95, '$\mathrm{%s}$' % description, ha='left', va='top', transform=ax.transAxes, fontsize=16)
+        ax.text(0.05, 0.9, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
+    else:
+        ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
 
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
@@ -59,8 +64,8 @@ def plotDifferences(orig, data, gmm, R, l, patch=None):
     ax = fig.add_subplot(111, aspect='equal')
 
     # plot inner and outer points
-    ax.plot(orig[:,0], orig[:,1], 'o', mfc='r', mec='None')
-    ax.plot(data[:,0], data[:,1], 'o', mfc='b', mec='None')
+    #ax.plot(orig[:,0], orig[:,1], 'o', mfc='None', mec='r', mew=1)
+    ax.plot(data[:,0], data[:,1], 's', mfc='b', mec='None')#, mew=1)
 
     # prediction
     B = 100
@@ -108,6 +113,8 @@ def plotDifferences(orig, data, gmm, R, l, patch=None):
         else:
             ax.add_artist(copy.copy(patch))
 
+    ax.text(0.05, 0.95, '$\mathrm{Dispersion}$', ha='left', va='top', transform=ax.transAxes, fontsize=16)
+
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
     ax.set_xticks([])
@@ -119,9 +126,11 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
+    """
     # plot inner and outer points
-    ax.plot(orig[:,0], orig[:,1], 'o', mfc='r', mec='None')
-    ax.plot(data[:,0], data[:,1], 'o', mfc='b', mec='None')
+    ax.plot(orig[:,0], orig[:,1], 'o', mfc='None', mec='r', mew=1)
+    ax.plot(data[:,0], data[:,1], 's', mfc='b', mec='None')
+    """
 
     # prediction
     B = 100
@@ -130,7 +139,7 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
 
     # compute sum_k(p_k(x)) for all x
     coverage = getCoverage(gmm, coords, sel_callback=sel_callback).reshape((B,B))
-    cs = ax.contourf(coverage, 10, extent=(-5,15,-5,15), cmap=plt.cm.Greys)
+    cs = ax.contourf(np.log(coverage), np.arange(-9,1), extent=(-5,15,-5,15), cmap=plt.cm.Greys, vmax=2)
     for c in cs.collections:
         c.set_edgecolor(c.get_facecolor())
 
@@ -143,6 +152,7 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
         else:
             ax.add_artist(copy.copy(patch))
 
+    ax.text(0.05, 0.95, '$\mathrm{Coverage}$', ha='left', va='top', transform=ax.transAxes, fontsize=16)
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
     ax.set_xticks([])
@@ -150,7 +160,7 @@ def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
     plt.tight_layout()
     plt.show()
 
-def getCoverage(gmm, coords, sel_callback=None, repeat=5, rotate=True):
+def getCoverage(gmm, coords, sel_callback=None, repeat=10, rotate=True):
     # create a new gmm with randomly drawn components at each point in coords:
     # estimate how this gmm can cover the volume spanned by coords
     if sel_callback is None:
@@ -186,7 +196,7 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=5, rotate=True):
             for c in unique_closest:
                 gmm_.mean[:] = inside[c]
                 closest_to_c = (closest_inside == c)
-                outside_cov[closest_to_c] += gmm_(outside[closest_to_c]) / gmm_(inside[c]) / repeat
+                outside_cov[closest_to_c] += gmm_(outside[closest_to_c]) / gmm_(np.array([inside[c]])) / repeat
             coverage[inv_sel] = outside_cov
     return coverage
 
@@ -212,7 +222,7 @@ def getTaperedDensity(coords, gmm=None, rng=np.random):
     return mask
 
 def getCut(coords, gmm=None):
-    return (coords[:,0] < 7)
+    return (coords[:,0] < 6)
 
 def getOver(coords, gmm):
     p_x = gmm(coords)
@@ -225,20 +235,20 @@ def getUnder(coords, gmm):
 def getSelection(type="hole", rng=np.random):
     if type == "hole":
         cb = getHole
-        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted')
+        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', lw=3, ls='dashed')
     if type == "box":
         cb = getBox
-        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')
+        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', lw=3, ls='dashed')
     if type == "boxWithHole":
         cb = getBoxWithHole
-        ps = [patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', ls='dotted'),
-            patches.Rectangle([0,0], 10, 10, fc="none", ec='b', ls='dotted')]
+        ps = [patches.Circle([6.5, 6.], radius=2, fc="none", ec='k', lw=1, ls='dashed'),
+            patches.Rectangle([0,0], 10, 10, fc="none", ec='k', lw=1, ls='dashed')]
     if type == "cut":
         cb = getCut
-        ps = lines.Line2D([7, 7],[-5, 15], ls='dotted', color='b')
+        ps = lines.Line2D([6, 6],[-5, 15], ls='dotted', lw=2, color='b')
     if type == "tapered":
         cb = partial(getTaperedDensity, rng=rng)
-        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', color='b')
+        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', lw=2, color='b')
     if type == "under":
         cb = getUnder
         ps = None
@@ -250,10 +260,11 @@ def getSelection(type="hole", rng=np.random):
 def getCovar(data, disp=1):
     return disp**2 * np.eye(data.shape[1])
 
+
 if __name__ == '__main__':
 
     # set up test
-    seed = 8366#3373 # 8422 # np.random.randint(1, 10000)
+    seed = 8366
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmis.VERBOSITY = 1
@@ -290,29 +301,29 @@ if __name__ == '__main__':
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
-    plotResults(orig, data, gmm, np.ones(1), patch=ps)
+    plotResults(orig, data, gmm, np.ones(1), patch=ps, description="Truth")
 
     # repeated runs: store results and logL
     K = 3
     R = 1
     gmm_ = pygmmis.GMM(K=K, D=D)
-    avg = pygmmis.GMM(K=K*R, D=D)
+    imp = pygmmis.GMM(K=K*R, D=D)
     l = np.empty(R)
 
-    # 1) without imputation, ignoring errors
+    # 1) pygmmis without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmis.fit(gmm_, data, w=w, cutoff=cutoff, init_callback=pygmmis.initFromDataAtRandom, rng=rng)
+        pygmmis.fit(gmm_, data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, rng=rng)
         l[r] = gmm_(data).mean()
-        avg.amp[r*K:(r+1)*K] = gmm_.amp
-        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
-        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    avg.amp /= avg.amp.sum()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, avg, l, patch=ps)
+    plotResults(orig, data, imp, l, patch=ps, description="standard\ EM")
 
-    # 2) with imputation, igoring errors
+    # 2) pygmmis with imputation, igoring errors
     # We need a better init function to allow the model to
     # start from a good initial location and to explore the
     # volume that is spanned by the missing part of the data
@@ -322,27 +333,27 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmis.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
+        imp_ = pygmmis.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
         l[r] = gmm_(data).mean()
-        avg.amp[r*K:(r+1)*K] = gmm_.amp
-        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
-        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    avg.amp /= avg.amp.sum()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, avg, l, patch=ps)
+    plotResults(orig, data, imp, l, patch=ps, description="\mathtt{GMMis},\ ignoring\ errors")
 
-    # 3) with imputation, incorporating errors
+    # 3) pygmmis with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     covar_cb = partial(getCovar, disp=disp)
     for r in xrange(R):
-        pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, rng=rng)
+        imp_ = pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, rng=rng)
         l[r] = gmm_(data).mean()
-        avg.amp[r*K:(r+1)*K] = gmm_.amp
-        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
-        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    avg.amp /= avg.amp.sum()
+        imp.amp[r*K:(r+1)*K] = gmm_.amp
+        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
+        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
+    imp.amp /= imp.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, avg, l, patch=ps)
-    #plotDifferences(orig, data, avg, R, l, patch=ps)
-    #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
+    plotResults(orig, data, imp, l, patch=ps, description="\mathtt{GMMis}")
+    #plotDifferences(orig, data, imp, R, l, patch=ps)
+    #plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
