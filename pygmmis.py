@@ -664,7 +664,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
 
     # perform sums for M step in the pool
-    # FIXME: in a partial run, could work on altered components only;
+    # NOTE: in a partial run, could work on altered components only;
     # however, there seem to be side effects or race conditions
     import parmap
     k = 0
@@ -815,14 +815,6 @@ def _getIMSums(gmm, U, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_c
     return A2, M2, C2, N2
 
 
-def _overlappingWith(k, gmm, cutoff=5):
-    if cutoff is not None:
-        chi2_k = gmm.logL_k(k, gmm.mean, covar=gmm.covar, chi2_only=True)
-        return np.flatnonzero(chi2_k < cutoff)
-    else:
-        return np.ones(gmm.K, dtype='bool')
-
-
 def _I(gmm, size, sel_callback, cutoff=3, covar=None, U=None, covar_reduce_fct=np.mean, rng=np.random):
 
     data2 = np.empty((size, gmm.D))
@@ -867,19 +859,11 @@ def _I(gmm, size, sel_callback, cutoff=3, covar=None, U=None, covar_reduce_fct=n
         covar2 = covar2[sel2]
 
     # determine U of each component:
-    # since components may overlap, simply using component2 is insufficient.
-    # for the sake of speed, we simply add all points whose components overlap
-    # with the one in question
-    # FIXME: This method does not account for added noise that could "connect"
+    # we could check overlap within cutoff of the gmm means with other components
+    # but this method does not account for added noise that could "connect"
     # two otherwise disjoint components.
+    # We therefore simple set the uninformative neighborhood = None
     U2 = [None for k in xrange(gmm.K)]
-    for k in xrange(gmm.K):
-        overlap_k = _overlappingWith(k, gmm, cutoff=cutoff)
-        mask2 = np.zeros(len(data2), dtype='bool')
-        for j in overlap_k:
-            mask2 |= (component2 == j)
-        U2[k] = np.flatnonzero(mask2)
-
     return data2, covar2, U2
 
 
