@@ -828,7 +828,7 @@ def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
         else:
             # create noise from unit covariance and then dot with covar2 to get
             # a noise distribution that follows individual covariances
-            noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=lens(data2))
+            noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=len(data2))
             noise = np.einsum('...ij,...j', covar2, noise)
         data2 += noise
     else:
