@@ -398,7 +398,11 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     if init_callback is not None:
         init_callback(gmm, data=data, covar=covar, rng=rng)
     elif VERBOSITY:
-        print "forgoing initialization. hopefully GMM was initialized..."
+        print "forgoing initialization: hopefully GMM was initialized..."
+
+    # test if callbacks are consistent
+    if covar is not None and sel_callback is not None and covar_callback is None:
+        raise RuntimeError("covar is set, but covar_callback is None: imputation samples inconsistent")
 
     # set up pool
     import multiprocessing
