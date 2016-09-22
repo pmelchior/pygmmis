@@ -826,9 +826,10 @@ def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
         if covar2.shape == (gmm.D, gmm.D): # one-for-all
             noise = rng.multivariate_normal(np.zeros(gmm.D), covar2, size=len(data2))
         else:
-            # create noise from unit covariance and then dot with eigenvalues
-            # decomposition of covar2 to get a the right noise distribution
-            # fasther than drawing one sample per each covariance
+            # create noise from unit covariance and then dot with eigenvalue
+            # decomposition of covar2 to get a the right noise distribution:
+            # n' = R V^1/2 n, where covar = R V R^-1
+            # faster than drawing one sample per each covariance
             noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=len(data2))
             val, rot = np.linalg.eigh(covar2)
             noise = np.einsum('...ij,...j', rot, np.sqrt(val)*noise)
