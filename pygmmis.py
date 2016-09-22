@@ -169,19 +169,16 @@ class GMM(object):
 
     def draw(self, size=1, sel_callback=None, invert_callback=False, rng=np.random):
         # draw indices for components given amplitudes, need to make sure: sum=1
-        ind = rng.choice(self.K, size=size, p=(self.amp/self.amp.sum()))
+        ind = rng.choice(self.K, size=size, p=self.amp/self.amp.sum())
+        N = np.bincount(ind, minlength=self.K)
+
+        # for each component: draw as many points as in ind from a normal
         samples = np.empty((size, self.D))
-        counter = 0
-        if size > self.K:
-            N_k = np.bincount(ind, minlength=self.K)
-            for k in xrange(self.K):
-                s = N_k[k]
-                samples[counter:counter+s] = rng.multivariate_normal(self.mean[k], self.covar[k], size=s)
-                counter += s
-        else:
-            for k in ind:
-                samples[counter] = rng.multivariate_normal(self.mean[k], self.covar[k], size=1)
-                counter += 1
+        lower = 0
+        for k in np.flatnonzero(N):
+            upper = lower + N[k]
+            samples[lower:upper, :] = rng.multivariate_normal(self.mean[k], self.covar[k], size=N[k])
+            lower = upper
 
         # if subsample with selection is required
         if sel_callback is not None:
@@ -816,27 +813,18 @@ def _getIMSums(gmm, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_call
 
 def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
 
-    # draw indices for components given amplitudes
-    ind = rng.choice(gmm.K, size=size, p=gmm.amp)
-    N2 = np.bincount(ind, minlength=gmm.K)
-
-    # for each component: draw as many points as in ind from a normal
-    data2 = np.empty((size, gmm.D))
-    lower = 0
-    for k in np.flatnonzero(N2):
-        upper = lower + N2[k]
-        data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
-        lower = upper
+    # draw sample from GMM, no selection (yet)
+    data2 = gmm.draw(size, rng=rng)
 
     # add noise
     if covar_callback is not None:
         covar2 = covar_callback(data2)
         if covar2.shape == (gmm.D, gmm.D): # one-for-all
-            noise = rng.multivariate_normal(np.zeros(gmm.D), covar2, size=upper)
+            noise = rng.multivariate_normal(np.zeros(gmm.D), covar2, size=len(data2))
         else:
             # create noise from unit covariance and then dot with covar2 to get
             # a noise distribution that follows individual covariances
-            noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=upper)
+            noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=lens(data2))
             noise = np.einsum('...ij,...j', covar2, noise)
         data2 += noise
     else:
