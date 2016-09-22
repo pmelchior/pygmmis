@@ -247,10 +247,13 @@ def getSelection(type="hole", rng=np.random):
         ps = None
     return cb, ps
 
+def getCovar(data, disp=1):
+    return disp**2 * np.eye(data.shape[1])
+
 if __name__ == '__main__':
 
     # set up test
-    seed = 3373 # 8422 # np.random.randint(1, 10000)
+    seed = 8366#3373 # 8422 # np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmis.VERBOSITY = 1
@@ -276,10 +279,10 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("cut", rng=rng)
+    cb, ps = getSelection("boxWithHole", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.8
+    disp = 0.7
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy, gmm)
@@ -296,7 +299,7 @@ if __name__ == '__main__':
     avg = pygmmis.GMM(K=K*R, D=D)
     l = np.empty(R)
 
-    # 1) run without imputation, ignoring errors
+    # 1) without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
@@ -309,22 +312,7 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)
 
-    """
-    # 2) run without imputation, incorporating errors
-    start = datetime.datetime.now()
-    rng = RandomState(seed)
-    for r in xrange(R):
-        pygmmis.fit(gmm_, data, covar=covar, w=w, cutoff=cutoff, rng=rng)
-        l[r] = gmm_(data).mean()
-        avg.amp[r*K:(r+1)*K] = gmm_.amp
-        avg.mean[r*K:(r+1)*K,:] = gmm_.mean
-        avg.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    avg.amp /= avg.amp.sum()
-    print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, avg, l, patch=ps)
-    """
-
-    # 3) run with imputation, igoring errors
+    # 2) with imputation, igoring errors
     # We need a better init function to allow the model to
     # start from a good initial location and to explore the
     # volume that is spanned by the missing part of the data
@@ -343,11 +331,12 @@ if __name__ == '__main__':
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)
 
-    # 4) run with imputation, incorporating errors
+    # 3) with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
+    covar_cb = partial(getCovar, disp=disp)
     for r in xrange(R):
-        pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, rng=rng)
+        pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean

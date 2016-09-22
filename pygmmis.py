@@ -394,7 +394,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callback=None, background=None, tol=1e-3, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callback=None, init_callback=None, background=None, tol=1e-3, split_n_merge=False, rng=np.random):
     # NOTE: If background is set, it implies cutoff=None
 
     # init components
@@ -422,7 +422,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     if VERBOSITY:
         global VERB_BUFFER
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, rng=rng)
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
@@ -454,9 +454,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
         # components, otherwise the contribution of the altered ones to the mixture
         # would be over-estimated.
         # Effectively, partial runs are as expensive as full runs.
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
 
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", altered=None, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", altered=None, rng=rng)
 
         if log_L >= log_L_:
             # revert to backup
@@ -474,7 +474,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, init_callba
     pool.close()
     return log_L, U
 
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -503,7 +503,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, bac
     gmm_.covar[:,:,:] = gmm.covar[:,:,:]
     while it < maxiter: # limit loop in case of slow convergence
 
-        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
+        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -548,7 +548,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, bac
     return log_L, N, N2
 
 
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
     import parmap
 
     if background is None:
@@ -612,7 +612,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     N = H.sum()
 
     # perform M step with M-sums of data and imputations runs
-    N2 = _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, altered=altered, rng=rng)
+    N2 = _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, covar_callback=covar_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, altered=altered, rng=rng)
     return log_L_, N, N2
 
 
@@ -656,7 +656,7 @@ def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
 
-def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, tol=1e-3, pool=None, chunksize=1, altered=None, rng=np.random):
+def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, covar_callback=None, tol=1e-3, pool=None, chunksize=1, altered=None, rng=np.random):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)                 # sum for amplitudes
@@ -675,7 +675,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
     # imputation step needs to be done with all components, even if only
     # altered ones are relevant for a partial run, otherwise their contribution
     # gets over-estimated
-    A2, M2, C2, N2 = _getIMSums(gmm, U, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, rng=rng)
+    A2, M2, C2, N2 = _getIMSums(gmm, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, covar_callback=covar_callback, rng=rng)
 
     if VERBOSITY:
         sel_outside = A2 > tol * A
@@ -762,17 +762,16 @@ def _computeMSums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
         return 0,0,0
 
 
-def _getIMSums(gmm, U, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_callback=None, over=1, rng=np.random):
+def _getIMSums(gmm, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_callback=None, covar_callback=None, over=1, rng=np.random):
 
     A2 = M2 = C2 = N2 = 0
 
     if sel_callback is not None:
-        tol = 1e-2
         size = N*over
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        data2, covar2, U2 = _I(gmm, size, sel_callback, cutoff=cutoff, covar=covar, U=U, rng=rng)
+        data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, rng=rng)
 
         N2 = len(data2)
         if N2 == 0:
@@ -815,47 +814,39 @@ def _getIMSums(gmm, U, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_c
     return A2, M2, C2, N2
 
 
-def _I(gmm, size, sel_callback, cutoff=3, covar=None, U=None, covar_reduce_fct=np.mean, rng=np.random):
-
-    data2 = np.empty((size, gmm.D))
-    if covar is None:
-        covar2 = None
-    else:
-        if covar.shape == (gmm.D, gmm.D): # one-for-all
-            covar2 = covar
-        else:
-            covar2 = np.empty((size, gmm.D, gmm.D))
+def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
 
     # draw indices for components given amplitudes
     ind = rng.choice(gmm.K, size=size, p=gmm.amp)
     N2 = np.bincount(ind, minlength=gmm.K)
 
-    # keep track which point comes from which component
-    component2 = np.empty(size, dtype='uint32')
-
     # for each component: draw as many points as in ind from a normal
+    data2 = np.empty((size, gmm.D))
     lower = 0
     for k in np.flatnonzero(N2):
         upper = lower + N2[k]
-        if covar is None:
-            data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
-        else:
-            # determine covar2 from given input covariances
-            if covar.shape == (gmm.D, gmm.D): # one-for-all
-                error_k = covar
-            else:
-                error_k = covar_reduce_fct(covar[U[k]], axis=0)
-                covar2[lower:upper, :,:] = error_k
-            data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k] + error_k, size=N2[k])
-        component2[lower:upper] = k
+        data2[lower:upper, :] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=N2[k])
         lower = upper
+
+    # add noise
+    if covar_callback is not None:
+        covar2 = covar_callback(data2)
+        if covar2.shape == (gmm.D, gmm.D): # one-for-all
+            noise = rng.multivariate_normal(np.zeros(gmm.D), covar2, size=upper)
+        else:
+            # create noise from unit covariance and then dot with covar2 to get
+            # a noise distribution that follows individual covariances
+            noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=upper)
+            noise = np.einsum('...ij,...j', covar2, noise)
+        data2 += noise
+    else:
+        covar2 = None
 
     # TODO: may want to decide whether to add noise before selection or after
     # Here we do noise, then selection, but this is not fundamental
     sel2 = ~sel_callback(data2, gmm=gmm)
     data2 = data2[sel2]
-    component2 = component2[sel2]
-    if covar is not None and covar.shape != (gmm.D, gmm.D):
+    if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
         covar2 = covar2[sel2]
 
     # determine U of each component:
