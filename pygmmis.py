@@ -508,16 +508,16 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
-        moved = shift2 > shift_cutoff
+        moved = np.flatnonzero(shift2 > shift_cutoff)
 
         if VERBOSITY:
-            print("%s%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, log_L_, (gmm.K - moved.sum())))
+            print("%s%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, log_L_, gmm.K - moved.size))
 
         # convergence tests:
-        if it > 0 and log_L_ - log_L < tol:
+        if it > 0 and moved.size == 0  and log_L_ - log_L < tol:
             # with imputation the observed data logL can decrease.
             # revert to previous model if that is the case
-            if sel_callback is not None and log_L_ < log_L:
+            if log_L_ < log_L:
                 gmm.amp[:] = gmm_.amp[:]
                 gmm.mean[:,:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
@@ -531,11 +531,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 
         # force update to U for all moved components
         if cutoff is not None:
-            for c in moved:
-                U[c] = None
+            for k in moved:
+                U[k] = None
 
-        if VERBOSITY >= 2 and moved.any():
-            print ("resetting neighborhoods of moving components: (" + ("%d," * moved.sum() + ")") % tuple(np.flatnonzero(moved)))
+        if VERBOSITY >= 2 and moved.size:
+            print ("resetting neighborhoods of moving components: (" + ("%d," * moved.size + ")") % tuple(moved))
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
