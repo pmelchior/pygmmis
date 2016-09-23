@@ -572,8 +572,9 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     # determine which points belong to background:
     # compare uniform background model with GMM,
     # use H to store association to signal vs background
-    # that decision conflicts with per-component U's, which also underestimates
-    # the probabilities under the signal model.
+    # that decision conflicts with per-component U's.
+    # also, if log_S would only be estimated for the points associated with the
+    # signal, it would also underestimated the probabilities under the joint model.
     # Thus, we ignore any cutoff and compute p(x|k) for all x and k
     else:
         if it == 0:
@@ -602,9 +603,11 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         log_S[:] = 0
         for log_p[k], U[k], T_inv[k] in \
         parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
-            log_S += np.exp(log_p[k]) # actually S, not logS
+            log_S += np.exp(log_p[k]) # actually S, not logS; need all points here for log_L below
             U[k] = H # shallow copy
             log_p[k] = log_p[k][H]
+            if T_inv[k] is not None and T_inv[k].shape != (gmm.D, gmm.D):
+                T_inv[k] = T_inv[k][H]
             k += 1
 
         log_L_ = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
@@ -676,7 +679,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
     # imputation step needs to be done with all components, even if only
     # altered ones are relevant for a partial run, otherwise their contribution
     # gets over-estimated
-    A2, M2, C2, N2 = _getIMSums(gmm, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, covar_callback=covar_callback, rng=rng)
+    A2, M2, C2, N2 = _getIMSums(gmm, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, covar_callback=covar_callback, over=1, rng=rng)
 
     if VERBOSITY:
         sel_outside = A2 > tol * A
