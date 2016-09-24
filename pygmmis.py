@@ -587,11 +587,12 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
         H[:] = q_bg < 0.5
 
+        print("BG%d\t%.3f\t%d" % (it, background.amp, (H==0).sum()))
+
         # recompute background amplitude;
         # for flat log_S, this is identical to summing up samplings with H[i]==0
         if background.adjust_amp:
             background.amp = q_bg.sum() / len(data)
-        print "BG:", background.amp, (H==0).sum(), np.median(q_bg), (log_S > 0).all()
 
         # reset signal U
         for k in xrange(gmm.K):
