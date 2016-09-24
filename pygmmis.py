@@ -644,14 +644,13 @@ def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
     # changes to U will be minimal
     if cutoff is not None:
         indices = chi2 < cutoff
-        if indices.any():
-            chi2 = chi2[indices]
-            if covar is not None and covar.shape != (gmm.D, gmm.D):
-                T_inv_k = T_inv_k[indices]
-            if U_k is None:
-                U_k = np.flatnonzero(indices)
-            else:
-                U_k = U_k[indices]
+        chi2 = chi2[indices]
+        if covar is not None and covar.shape != (gmm.D, gmm.D):
+            T_inv_k = T_inv_k[indices]
+        if U_k is None:
+            U_k = np.flatnonzero(indices)
+        else:
+            U_k = U_k[indices]
 
     # prevent tiny negative determinants to mess up
     (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
