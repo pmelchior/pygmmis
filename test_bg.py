@@ -253,6 +253,9 @@ def getSelection(type="hole", rng=np.random):
         ps = None
     return cb, ps
 
+def getCovar(data, disp=1):
+    return disp**2 * np.eye(data.shape[1])
+
 if __name__ == '__main__':
 
     # set up test
@@ -351,13 +354,14 @@ if __name__ == '__main__':
     avg.amp /= avg.amp.sum()
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, l, patch=ps)
-    raise
+
     # 4) run with imputation, incorporating errors
+    covar_cb = partial(getCovar, disp=disp)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
         bg.amp = bg_amp
-        pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
+        pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
         l[r] = gmm_(data).mean()
         avg.amp[r*K:(r+1)*K] = gmm_.amp
         avg.mean[r*K:(r+1)*K,:] = gmm_.mean
