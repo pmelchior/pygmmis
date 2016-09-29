@@ -514,20 +514,21 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
             print("%s%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, log_L_, gmm.K - moved.size))
 
         # convergence tests:
-        if it > 0 and moved.size == 0  and log_L_ - log_L < tol:
-            # with imputation the observed data logL can decrease.
-            # revert to previous model if that is the case
-            if log_L_ < log_L:
+        if it > 0 and log_L_ < log_L + tol:
+            # with imputation or background fitting, observed logL can decrease
+            # allow some slack, but revert to previous model if it gets worse
+            if log_L_ < log_L - tol:
                 gmm.amp[:] = gmm_.amp[:]
                 gmm.mean[:,:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
                 if VERBOSITY:
                     print("likelihood decreased: reverting to previous model")
-            else:
+                break
+            elif moved.size == 0:
                 log_L = log_L_
                 if VERBOSITY:
                     print ("likelihood converged within tolerance %r: stopping here." % tol)
-            break
+                break
 
         # force update to U for all moved components
         if cutoff is not None:
