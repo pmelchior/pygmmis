@@ -260,11 +260,19 @@ def getSelection(type="hole", rng=np.random):
 def getCovar(data, disp=1):
     return disp**2 * np.eye(data.shape[1])
 
+def getBackgroundSample(bg_amp=0.1, sel_callback=None):
+    bg_sample = -5 + 20*rng.rand(int(bg_amp*N/(1-bg_amp)),D)
+    if sel_callback is not None:
+        sel_bg = cb(bg_sample, None)
+        bg_sample = bg_sample[sel_bg]
+    return bg_sample
 
 if __name__ == '__main__':
 
     # set up test
     seed = 8366
+    disp = 0.7
+    bg_amp = 0
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmis.VERBOSITY = 1
@@ -293,11 +301,26 @@ if __name__ == '__main__':
     cb, ps = getSelection("boxWithHole", rng=rng)
 
     # add isotropic errors on data
-    disp = 0.7
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
     # apply selection
     sel = cb(noisy, gmm)
-    data = pygmmis.createShared(noisy[sel])
+    noisy = noisy[sel]
+
+    # add uniform background?
+    # NOTE: since background is not clustered, additive noise is not needed
+    if bg_amp > 0:
+        bg_sample = getBackgroundSample(bg_amp, sel_callback=cb)
+        bg_amp = bg_sample.size * 1./ (bg_sample.size + noisy.size)
+        noisy = np.concatenate((noisy, bg_sample))
+
+        bg = pygmmis.Background(D=D)
+        bg.amp = bg_amp
+        bg.adjust_amp = True
+        bg.computeVolume(orig, sel_callback=cb)
+    else:
+        bg = None
+
+    data = pygmmis.createShared(noisy)
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
@@ -314,7 +337,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmis.fit(gmm_, data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, rng=rng)
+        pygmmis.fit(gmm_, data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -333,7 +356,7 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = pygmmis.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, rng=rng)
+        imp_ = pygmmis.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
@@ -347,7 +370,7 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     covar_cb = partial(getCovar, disp=disp)
     for r in xrange(R):
-        imp_ = pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, rng=rng)
+        imp_ = pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
         l[r] = gmm_(data).mean()
         imp.amp[r*K:(r+1)*K] = gmm_.amp
         imp.mean[r*K:(r+1)*K,:] = gmm_.mean
