@@ -278,6 +278,7 @@ class Background(object):
         self.D = D
         self.V = None
         self.adjust_amp = True
+        self.amp_max = 1
 
     @property
     def p(self):
@@ -594,7 +595,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         # recompute background amplitude;
         # for flat log_S, this is identical to summing up samplings with H[i]==0
         if background.adjust_amp:
-            background.amp = q_bg.sum() / len(data)
+            background.amp = min(q_bg.sum() / len(data), background.amp_max)
 
         # reset signal U
         for k in xrange(gmm.K):
