@@ -965,7 +965,7 @@ def cv_fit(gmm, data, L=10, **kwargs):
     # to L-fold CV here, need to split covar too if set
     covar = kwargs.pop("covar", None)
     for i in xrange(L):
-        print "rng state",rng.rand()
+        rng.set_state(rng_state)
         mask = np.arange(N) % L == i
         if covar is None:
             fit(gmm, data[~mask], **kwargs)
