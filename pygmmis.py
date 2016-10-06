@@ -958,10 +958,26 @@ def cv_fit(gmm, data, L=10, **kwargs):
     N = len(data)
     lcv = np.empty(N)
 
-    # make sure we know what the RNG is
+    if VERBOSITY:
+        print "running %d-fold cross-validation ..." % L
+
+    # make sure we know what the RNG is,
+    # fix state of RNG to make behavior of fit reproducable
     rng = kwargs.get("rng", np.random)
-    # fix state of RNG to make behaviro of fit reproducable
     rng_state = rng.get_state()
+
+    # need to copy the gmm when init_cb is None
+    # otherwise runs start from different init positions
+    gmm0 = GMM(K=gmm.K, D=gmm.D)
+    gmm0.amp[:,] = gmm.amp[:]
+    gmm0.mean[:,:] = gmm.mean[:,:]
+    gmm0.covar[:,:,:] = gmm.covar[:,:,:]
+
+    # same for bg if present
+    bg = kwargs.get("background", None)
+    if bg is not None:
+        bg_amp0 = bg.amp
+
     # to L-fold CV here, need to split covar too if set
     covar = kwargs.pop("covar", None)
     for i in xrange(L):
@@ -973,5 +989,12 @@ def cv_fit(gmm, data, L=10, **kwargs):
         else:
             fit(gmm, data[~mask], covar=covar[~mask], **kwargs)
             lcv[mask] = gmm(data[mask], covar=covar[mask])
+
+        # undo for consistency
+        gmm.amp[:,] = gmm0.amp[:]
+        gmm.mean[:,:] = gmm0.mean[:,:]
+        gmm.covar[:,:,:] = gmm0.covar[:,:,:]
+        if bg is not None:
+            bg.amp = bg_amp0
 
     return lcv
