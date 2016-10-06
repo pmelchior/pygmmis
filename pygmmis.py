@@ -948,3 +948,30 @@ def _update_snm(gmm, altered, U, N, cleanup):
     gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
     gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1./gmm.D) * np.eye(gmm.D)
     U[altered[1]] = U[altered[2]].copy() # now 1 and 2 have same U
+
+
+# L-fold cross-validation of the fit function.
+# all parameters for fit must be supplied with kwargs.
+# the rng seed will be fixed for the CV runs so that all random effects are the
+# same for each run.
+def cv_fit(gmm, data, L=10, **kwargs):
+    N = len(data)
+    lcv = np.empty(N)
+
+    # make sure we know what the RNG is
+    rng = kwargs.get("rng", np.random)
+    # fix state of RNG to make behaviro of fit reproducable
+    rng_state = rng.get_state()
+    # to L-fold CV here, need to split covar too if set
+    covar = kwargs.pop("covar", None)
+    for i in xrange(L):
+        print "rng state",rng.rand()
+        mask = np.arange(N) % L == i
+        if covar is None:
+            fit(gmm, data[~mask], **kwargs)
+            lcv[mask] = gmm(data[mask])
+        else:
+            fit(gmm, data[~mask], covar=covar[~mask], **kwargs)
+            lcv[mask] = gmm(data[mask], covar=covar[mask])
+
+    return lcv
