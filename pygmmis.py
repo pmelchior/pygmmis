@@ -983,12 +983,12 @@ def cv_fit(gmm, data, L=10, **kwargs):
     for i in xrange(L):
         rng.set_state(rng_state)
         mask = np.arange(N) % L == i
-        if covar is None:
-            fit(gmm, data[~mask], **kwargs)
-            lcv[mask] = gmm(data[mask])
+        if covar is None or covar.shape == (gmm.D, gmm.D):
+            fit(gmm, data[~mask], covar=covar, **kwargs)
+            lcv[mask] = gmm.logL(data[mask], covar=covar)
         else:
             fit(gmm, data[~mask], covar=covar[~mask], **kwargs)
-            lcv[mask] = gmm(data[mask], covar=covar[mask])
+            lcv[mask] = gmm.logL(data[mask], covar=covar[mask])
 
         # undo for consistency
         gmm.amp[:,] = gmm0.amp[:]
@@ -998,3 +998,45 @@ def cv_fit(gmm, data, L=10, **kwargs):
             bg.amp = bg_amp0
 
     return lcv
+
+def stack(gmms, weights):
+    # build stacked model by combining all gmms and applying weights to amps
+    stacked = GMM(K=0, D=gmms[0].D)
+    for m in xrange(len(gmms)):
+        stacked.amp = np.concatenate((stacked.amp[:], weights[m]*gmms[m].amp[:]))
+        stacked.mean = np.concatenate((stacked.mean[:,:], gmms[m].mean[:,:]))
+        stacked.covar = np.concatenate((stacked.covar[:,:,:], gmms[m].covar[:,:,:]))
+    stacked.amp /= stacked.amp.sum()
+    return stacked
+
+def stack_fit(gmms, data, kwargs, L=10, tol=1e-5, rng=np.random):
+    M = len(gmms)
+    N = len(data)
+    lcvs = np.empty((M,N))
+
+    for m in xrange(M):
+        # run CV to get cross-validation likelihood
+        rng_state = rng.get_state()
+        lcvs[m,:] = cv_fit(gmms[m], data, L=L, **(kwargs[m]))
+        rng.set_state(rng_state)
+        # run normal fit on all data
+        fit(gmms[m], data, **(kwargs[m]))
+
+    # determine the weights that maximize the stacked estimator likelihood
+    # run a tiny EM on lcvs to get them
+    beta = np.ones(M)/M
+    log_p_k = np.empty_like(lcvs)
+    log_S = np.empty(N)
+    it = 0
+    while True and it < 20:
+        log_p_k[:,:] = lcvs + np.log(beta)[:,None]
+        log_S[:] = logsum(log_p_k)
+        log_p_k[:,:] -= log_S
+        beta[:] = np.exp(logsum(log_p_k, axis=1)) / N
+        logL_ = log_S.mean()
+        print "STACK%d\t%.4f\t%r" % (it, logL_, beta)
+        if it > 0 and logL_ - logL < tol:
+            break
+        logL = logL_
+        it += 1
+    return stack(gmms, beta)
