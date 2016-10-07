@@ -548,6 +548,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
         gmm_.covar[:,:,:] = gmm.covar[:,:,:]
 
         it += 1
+
+    if VERBOSITY:
+        print ""
+
     return log_L, N, N2
 
 
@@ -1034,15 +1038,22 @@ def stack_fit(gmms, data, kwargs, L=10, tol=1e-5, rng=np.random):
     log_p_k = np.empty_like(lcvs)
     log_S = np.empty(N)
     it = 0
+    if VERBOSITY:
+        print "optimizing stacking weights\n"
+        print "ITER\tLOG_L"
     while True and it < 20:
         log_p_k[:,:] = lcvs + np.log(beta)[:,None]
         log_S[:] = logsum(log_p_k)
         log_p_k[:,:] -= log_S
         beta[:] = np.exp(logsum(log_p_k, axis=1)) / N
         logL_ = log_S.mean()
-        print "STACK%d\t%.4f\t%r" % (it, logL_, beta)
+        if VERBOSITY:
+            print "STACK%d\t%.4f" % (it, logL_)
+
         if it > 0 and logL_ - logL < tol:
             break
         logL = logL_
         it += 1
+    if VERBOSITY:
+        print ""
     return stack(gmms, beta)
