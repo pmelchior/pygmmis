@@ -961,6 +961,12 @@ def cv_fit(gmm, data, L=10, **kwargs):
     if VERBOSITY:
         print "running %d-fold cross-validation ..." % L
 
+    # CV and stacking can't have probabilistic inits that depends on
+    # data or subsets thereof
+    init_callback = kwargs.get("init_callback", None)
+    if init_callback is not None:
+        raise RuntimeError("Cross-validation can only be used consistently with init_callback=None")
+
     # make sure we know what the RNG is,
     # fix state of RNG to make behavior of fit reproducable
     rng = kwargs.get("rng", np.random)
