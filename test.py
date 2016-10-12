@@ -9,7 +9,7 @@ import matplotlib.cm
 import datetime
 from functools import partial
 
-def plotResults(orig, data, gmm, l, patch=None, description=None):
+def plotResults(orig, data, gmm, patch=None, description=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
@@ -22,13 +22,8 @@ def plotResults(orig, data, gmm, l, patch=None, description=None):
     x,y = np.meshgrid(np.linspace(-5,15,B), np.linspace(-5,15,B))
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
-    # weight with logL of each run
-    gmm_ = gmm
-    gmm_.amp = (np.split(gmm_.amp, l.size) * l[:,None]).flatten()
-    gmm_.amp /= gmm_.amp.sum()
-
     # compute sum_k(p_k(x)) for all x
-    p = gmm_(coords).reshape((B,B))
+    p = gmm(coords).reshape((B,B))
     # for better visibility use arcshinh stretch
     p = np.arcsinh(p/1e-4)
     cs = ax.contourf(p, 10, extent=(-5,15,-5,15), cmap=plt.cm.Greys)
@@ -45,7 +40,7 @@ def plotResults(orig, data, gmm, l, patch=None, description=None):
             ax.add_artist(copy.copy(patch))
 
     # add description and complete data logL to plot
-    logL = gmm_(orig, as_log=True).mean()
+    logL = gmm(orig, as_log=True).mean()
     if description is not None:
         ax.text(0.05, 0.95, '$\mathrm{%s}$' % description, ha='left', va='top', transform=ax.transAxes, fontsize=16)
         ax.text(0.05, 0.9, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
@@ -59,7 +54,7 @@ def plotResults(orig, data, gmm, l, patch=None, description=None):
     plt.tight_layout()
     plt.show()
 
-def plotDifferences(orig, data, gmm, R, l, patch=None):
+def plotDifferences(orig, data, gmms, avg, l, patch=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
@@ -72,27 +67,14 @@ def plotDifferences(orig, data, gmm, R, l, patch=None):
     x,y = np.meshgrid(np.linspace(-5,15,B), np.linspace(-5,15,B))
     coords = np.dstack((x.flatten(), y.flatten()))[0]
 
-    # weight with logL of each run
-    gmm_ = gmm
-    gmm_.amp = (np.split(gmm_.amp, l.size) * l[:,None]).flatten()
-    gmm_.amp /= gmm_.amp.sum()
-
     # compute sum_k(p_k(x)) for all x
-    pw = gmm_(coords).reshape((B,B))
+    pw = avg(coords).reshape((B,B))
 
     # use each run and compute weighted std
-    K = gmm.K / R
     p = np.empty((R,B,B))
     for r in xrange(R):
-        comps = np.arange(r*K, (r+1)*K)
-        gmm_ = pygmmis.GMM(K=K, D=gmm.D)
-        gmm_.amp[:] = gmm.amp[comps]
-        gmm_.amp /= gmm_.amp.sum()
-        gmm_.mean[:,:] = gmm.mean[comps,:]
-        gmm_.covar[:,:,:] = gmm.covar[comps,:,:]
-
         # compute sum_k(p_k(x)) for all x
-        p[r,:,:] = gmm_(coords).reshape((B,B))
+        p[r,:,:] = gmms[r](coords).reshape((B,B))
 
     p = ((p-pw[None,:,:])**2 * l[:,None, None]).sum(axis=0)
     V1 = l.sum()
@@ -232,6 +214,9 @@ def getUnder(coords, gmm):
     p_x = gmm(coords)
     return p_x < 0.025
 
+def getAll(coords, gmm):
+    return np.ones(len(coords), dtype='bool')
+
 def getSelection(type="hole", rng=np.random):
     if type == "hole":
         cb = getHole
@@ -254,6 +239,9 @@ def getSelection(type="hole", rng=np.random):
         ps = None
     if type == "over":
         cb = getOver
+        ps = None
+    if type == "none":
+        cb = getAll
         ps = None
     return cb, ps
 
@@ -307,7 +295,8 @@ if __name__ == '__main__':
     noisy = noisy[sel]
 
     # add uniform background?
-    # NOTE: since background is not clustered, additive noise is not needed
+    # NOTE: since background is not clustered,
+    # additive noise is not needed as long as it as also spatially constant
     if bg_amp > 0:
         bg_sample = getBackgroundSample(bg_amp, sel_callback=cb)
         bg_amp = bg_sample.size * 1./ (bg_sample.size + noisy.size)
@@ -324,27 +313,23 @@ if __name__ == '__main__':
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
-    plotResults(orig, data, gmm, np.ones(1), patch=ps, description="Truth")
+    plotResults(orig, data, gmm, patch=ps, description="Truth")
 
     # repeated runs: store results and logL
     K = 3
-    R = 1
-    gmm_ = pygmmis.GMM(K=K, D=D)
-    imp = pygmmis.GMM(K=K*R, D=D)
+    R = 10
     l = np.empty(R)
+    gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(R)]
+    covar_cb = partial(getCovar, disp=disp)
 
     # 1) pygmmis without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        pygmmis.fit(gmm_, data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
-        l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+    avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps, description="standard\ EM")
+    plotResults(orig, data, avg, patch=ps, description="standard\ EM")
 
     # 2) pygmmis with imputation, igoring errors
     # We need a better init function to allow the model to
@@ -356,27 +341,30 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
-        imp_ = pygmmis.fit(gmm_, data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
-        l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
+    avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps, description="\mathtt{GMMis},\ ignoring\ errors")
+    plotResults(orig, data, avg, patch=ps, description="\mathtt{GMMis},\ ignoring\ errors")
 
     # 3) pygmmis with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    covar_cb = partial(getCovar, disp=disp)
     for r in xrange(R):
-        imp_ = pygmmis.fit(gmm_, data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
-        l[r] = gmm_(data).mean()
-        imp.amp[r*K:(r+1)*K] = gmm_.amp
-        imp.mean[r*K:(r+1)*K,:] = gmm_.mean
-        imp.covar[r*K:(r+1)*K,:,:] = gmm_.covar
-    imp.amp /= imp.amp.sum()
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
+    avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, imp, l, patch=ps, description="\mathtt{GMMis}")
-    #plotDifferences(orig, data, imp, R, l, patch=ps)
-    #plotCoverage(orig, data, imp, patch=ps, sel_callback=cb)
+    plotResults(orig, data, avg, patch=ps, description="\mathtt{GMMis}")
+    #plotDifferences(orig, data, gmms, avg, l, patch=ps)
+    #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
+
+    """
+    # stacked estimator: needs to do init by hand to keep it fixed
+    start = datetime.datetime.now()
+    rng = RandomState(seed)
+    for r in xrange(R):
+        init_cb(gmms[r], data=data, covar=covar, rng=rng)
+    kwargs = [dict(covar=covar, init_callback=None, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng) for i in xrange(R)]
+    stacked = pygmmis.stack_fit(gmms, data, kwargs, L=10, rng=rng)
+    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    plotResults(orig, data, stacked, patch=ps, description="Stacked")
+    """
