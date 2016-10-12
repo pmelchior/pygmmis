@@ -556,8 +556,46 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 
 
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
-    import parmap
 
+    log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
+    A,M,C,N = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize)
+
+    A2 = M2 = C2 = N2 = 0
+    if sel_callback is not None:
+
+        # create fake data with same mechanism as the original data,
+        # but invert selection to get the missing part
+        over = 1
+        size = N*over
+
+        data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, rng=rng)
+        N2 = len(data2)
+
+        if N2 > 0:
+            A2 = np.zeros(gmm.K)
+            M2 = np.zeros((gmm.K, gmm.D))
+            C2 = np.zeros((gmm.K, gmm.D, gmm.D))
+
+            log_S2 = np.zeros(len(data2))
+            H2 = np.zeros(len(data2), dtype='bool')
+            log_p2 = [[] for k in xrange(gmm.K)]
+            T2_inv = [None for k in xrange(gmm.K)]
+
+            # TODO: can we avoid to recompute the model prediction each time for the background H?
+            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=0)
+            A2,M2,C2,N2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, pool=pool, chunksize=chunksize)
+
+            sel_outside = A2 > tol * A
+            if VERBOSITY >= 2 and sel_outside.any():
+                print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
+
+    _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=altered)
+
+    return log_L, N, N2
+
+
+def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, pool=None, chunksize=1, cutoff=None, it=0):
+    import parmap
     if background is None:
         # compute p(i | k) for each k independently in the pool
         # need S = sum_k p(i | k) for further calculation
@@ -566,14 +604,14 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         H[:] = 0
         k = 0
         for log_p[k], U[k], T_inv[k] in \
-        parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
+        parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, cutoff, pool=pool, chunksize=chunksize):
             log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
             H[U[k]] = 1
             k += 1
 
         # need log(S), but since log(0) isn't a good idea, need to restrict to N_
         log_S[H] = np.log(log_S[H])
-        log_L_ = log_S[H].mean()
+        log_L = log_S[H].mean()
 
     # determine which points belong to background:
     # compare uniform background model with GMM,
@@ -610,7 +648,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         k = 0
         log_S[:] = 0
         for log_p[k], U[k], T_inv[k] in \
-        parmap.starmap(_Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+        parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
             log_S += np.exp(log_p[k]) # actually S, not logS; need all points here for log_L below
             U[k] = H # shallow copy
             log_p[k] = log_p[k][H]
@@ -618,17 +656,12 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
                 T_inv[k] = T_inv[k][H]
             k += 1
 
-        log_L_ = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
+        log_L = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
-
-    N = H.sum()
-
-    # perform M step with M-sums of data and imputations runs
-    N2 = _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=covar, w=w, sel_callback=sel_callback, covar_callback=covar_callback, cutoff=cutoff, tol=tol, pool=pool, chunksize=chunksize, altered=altered, rng=rng)
-    return log_L_, N, N2
+    return log_L
 
 
-def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
+def _Esum(k, U_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
     if U_k is None:
@@ -667,12 +700,13 @@ def _Estep(k, U_k, gmm, data, covar=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
 
-def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None, sel_callback=None, covar_callback=None, tol=1e-3, pool=None, chunksize=1, altered=None, rng=np.random):
+def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, pool=None, chunksize=1):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)                 # sum for amplitudes
     M = np.empty((gmm.K, gmm.D))        # ... means
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
+    N = H.sum()
 
     # perform sums for M step in the pool
     # NOTE: in a partial run, could work on altered components only;
@@ -680,21 +714,9 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, N, data, covar=None, w=0, cutoff=None
     import parmap
     k = 0
     for A[k], M[k,:], C[k,:,:] in \
-    parmap.starmap(_computeMSums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
+    parmap.starmap(_Msums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
-
-    # imputation step needs to be done with all components, even if only
-    # altered ones are relevant for a partial run, otherwise their contribution
-    # gets over-estimated
-    A2, M2, C2, N2 = _getIMSums(gmm, N, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize, sel_callback=sel_callback, covar_callback=covar_callback, over=1, rng=rng)
-
-    if VERBOSITY:
-        sel_outside = A2 > tol * A
-        if VERBOSITY >= 2 and sel_outside.any():
-            print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
-
-    _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=altered)
-    return N2
+    return A,M,C,N
 
 
 def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
@@ -729,7 +751,7 @@ def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
         gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
 
 
-def _computeMSums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
+def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
     if log_p_k.size:
         # get log_q_ik by dividing with S = sum_k p_ik
         # NOTE:  this modifies log_p_k in place, but is only relevant
@@ -771,58 +793,6 @@ def _computeMSums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
         return A_k, M_k, C_k
     else:
         return 0,0,0
-
-
-def _getIMSums(gmm, N, covar=None, cutoff=None, pool=None, chunksize=1, sel_callback=None, covar_callback=None, over=1, rng=np.random):
-
-    A2 = M2 = C2 = N2 = 0
-
-    if sel_callback is not None:
-        size = N*over
-
-        # create fake data with same mechanism as the original data,
-        # but invert selection to get the missing part
-        data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, rng=rng)
-
-        N2 = len(data2)
-        if N2 == 0:
-            return A2, M2, C2, N2
-
-        A2 = np.zeros(gmm.K)
-        M2 = np.zeros((gmm.K, gmm.D))
-        C2 = np.zeros((gmm.K, gmm.D, gmm.D))
-
-        # similar setup as above: E-step plus the sums from the Mstep.
-        # the latter will be added to the original data sums
-        log_S2 = np.zeros(len(data2))
-        H2 = np.zeros(len(data2), dtype='bool')
-        log_p2 = [[] for k in xrange(gmm.K)]
-        T2_inv = [None for k in xrange(gmm.K)]
-
-        # run E-step on data2
-        import parmap
-        k = 0
-        for log_p2[k], U2[k], T2_inv[k] in \
-        parmap.starmap(_Estep, zip(xrange(gmm.K), U2), gmm, data2, covar2, cutoff, pool=pool, chunksize=chunksize):
-            log_S2[U2[k]] += np.exp(log_p2[k])
-            H2[U2[k]] = 1
-            k += 1
-
-        log_S2[H2] = np.log(log_S2[H2])
-        N2 = H2.sum()
-
-        k = 0
-        for A2[k], M2[k,:], C2[k,:,:] in \
-        parmap.starmap(_computeMSums, zip(xrange(gmm.K), U2, log_p2, T2_inv), gmm, data2, log_S2, pool=pool, chunksize=chunksize):
-            k += 1
-
-        # normalize over-sampling
-        A2 /= over
-        M2 /= over
-        C2 /= over
-        N2 /= over
-
-    return A2, M2, C2, N2
 
 
 def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
