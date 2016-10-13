@@ -273,41 +273,21 @@ class GMM(object):
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
 class Background(object):
-    def __init__(self, D=1):
+    def __init__(self, footprint):
         self.amp = 0
-        self.D = D
-        self.V = None
+        self.footprint = footprint
         self.adjust_amp = True
         self.amp_max = 1
 
     @property
     def p(self):
-        if self.V is not None:
-            return 1./self.V
-        else:
-            raise RuntimeError("Background.p: volume V not set!")
+        volume = np.prod(self.footprint[1] - self.footprint[0])
+        return 1./volume
 
-    def computeVolume(self, data, sel_callback=None, sel_B=10, sel_over=10, rng=np.random):
-        # volumne spanned by data
-        min_pos = data.min(axis=0)
-        max_pos = data.max(axis=0)
-        delta_pos = max_pos - min_pos
+    def draw(self, size=1, rng=np.random):
+        dx = self.footprint[1] - self.footprint[0]
+        return self.footprint[0] + dx*rng.rand(size,len(self.footprint[0]))
 
-        # limit to observed subvolume
-        if sel_callback is None:
-            self.V = np.prod(delta_pos)
-        else:
-            # divide range into B cells per dimensions
-            N_cells = sel_B**3
-            N_samples = N_cells * sel_over
-            samples = delta_pos * rng.rand(N_samples, self.D) + min_pos
-            sel = sel_callback(samples)
-            histdd = np.histogramdd(samples[sel], sel_B)[0]
-            filled = np.flatnonzero(histdd).size
-            # multiply with volume of each cell
-            vol_cell = np.prod(delta_pos/sel_B)
-            self.V = filled * vol_cell
-        return self.V
 
 ############################
 # Begin of fit functions

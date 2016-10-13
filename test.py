@@ -248,19 +248,12 @@ def getSelection(type="hole", rng=np.random):
 def getCovar(data, disp=1):
     return disp**2 * np.eye(data.shape[1])
 
-def getBackgroundSample(bg_amp=0.1, sel_callback=None):
-    bg_sample = -5 + 20*rng.rand(int(bg_amp*N/(1-bg_amp)),D)
-    if sel_callback is not None:
-        sel_bg = cb(bg_sample, None)
-        bg_sample = bg_sample[sel_bg]
-    return bg_sample
-
 if __name__ == '__main__':
 
     # set up test
     seed = 8366
     disp = 0.7
-    bg_amp = 0
+    bg_amp = 0.1
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmis.VERBOSITY = 1
@@ -286,7 +279,7 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("boxWithHole", rng=rng)
+    cb, ps = getSelection("tapered", rng=rng)
 
     # add isotropic errors on data
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
@@ -298,14 +291,14 @@ if __name__ == '__main__':
     # NOTE: since background is not clustered,
     # additive noise is not needed as long as it as also spatially constant
     if bg_amp > 0:
-        bg_sample = getBackgroundSample(bg_amp, sel_callback=cb)
-        bg_amp = bg_sample.size * 1./ (bg_sample.size + noisy.size)
-        noisy = np.concatenate((noisy, bg_sample))
-
-        bg = pygmmis.Background(D=D)
+        footprint = np.array([-10,-5]), np.array([15,15])
+        bg = pygmmis.Background(footprint)
         bg.amp = bg_amp
         bg.adjust_amp = True
-        bg.computeVolume(orig, sel_callback=cb)
+
+        bg_sample = bg.draw(bg_amp*N, rng=rng)
+        bg_sel = cb(bg_sample, gmm)
+        noisy = np.concatenate((noisy, bg_sample[bg_sel]))
     else:
         bg = None
 
@@ -317,7 +310,7 @@ if __name__ == '__main__':
 
     # repeated runs: store results and logL
     K = 3
-    R = 10
+    R = 1
     l = np.empty(R)
     gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(R)]
     covar_cb = partial(getCovar, disp=disp)
