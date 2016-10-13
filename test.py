@@ -319,6 +319,8 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
+        if bg is not None:
+            bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
@@ -334,6 +336,8 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
+        if bg is not None:
+            bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
@@ -343,6 +347,8 @@ if __name__ == '__main__':
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
+        if bg is not None:
+            bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds

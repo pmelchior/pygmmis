@@ -543,9 +543,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
 
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
-    A,M,C,N = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, pool=pool, chunksize=chunksize)
+    A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
-    A2 = M2 = C2 = N2 = 0
+    A2 = M2 = C2 = N2 = B2 = 0
     if sel_callback is not None:
 
         # create fake data with same mechanism as the original data,
@@ -568,13 +568,13 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
             T2_inv = [None for k in xrange(gmm.K)]
 
             log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
-            A2,M2,C2,N2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, pool=pool, chunksize=chunksize)
+            A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
             sel_outside = A2 > tol * A
             if VERBOSITY >= 2 and sel_outside.any():
                 print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
-    _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=altered)
+    _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, altered=altered, background=background)
 
     return log_L, N, N2
 
@@ -636,11 +636,6 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
         log_L = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
 
-        # recompute background amplitude;
-        # for flat log_S, this is identical to summing up samplings with H[i]==0
-        if background.adjust_amp:
-            background.amp = min(q_bg.sum() / len(data), background.amp_max)
-
     return log_L
 
 
@@ -683,13 +678,14 @@ def _Esum(k, U_k, gmm, data, covar=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
 
-def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, pool=None, chunksize=1):
+def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, background=None, pool=None, chunksize=1):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)                 # sum for amplitudes
     M = np.empty((gmm.K, gmm.D))        # ... means
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
     N = H.sum()
+    B = None
 
     # perform sums for M step in the pool
     # NOTE: in a partial run, could work on altered components only;
@@ -699,10 +695,16 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, pool=N
     for A[k], M[k,:], C[k,:,:] in \
     parmap.starmap(_Msums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, log_S, pool=pool, chunksize=chunksize):
         k += 1
-    return A,M,C,N
+
+    if background is not None:
+        p_bg = background.amp * background.p
+        q_bg = p_bg / (p_bg + np.exp(np.log(1-background.amp) + log_S))
+        B = q_bg.sum()
+
+    return A,M,C,N,B
 
 
-def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
+def _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, altered=None, background=None):
     # M-step for all components using data (and data2, if non-zero sums are set)
 
     # partial EM: normal update for mean and covar, but constrained for amp
@@ -732,6 +734,11 @@ def _update(gmm, A, M, C, N, A2, M2, C2, N2, w, altered=None):
         gmm.covar[changed,:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changed,:,:] / (A + A2 + 1)[changed,None,None]
     else:
         gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
+
+    # recompute background amplitude;
+    # for flat log_S, this is identical to summing up samplings with H[i]==0
+    if background is not None and background.adjust_amp:
+        background.amp = min((B + B2) / (N + N2), background.amp_max)
 
 
 def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
