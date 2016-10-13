@@ -553,7 +553,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         # but invert selection to get the missing part
         over = 1
         # FIXME: imputation needs to attempt to guess true underlying N, not only observed N!
-        size = (N+N2)*over
+        size = int((N+N2)*over)
 
         data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, background=background, rng=rng)
         N2 = len(data2)
@@ -793,10 +793,14 @@ def _I(gmm, size, sel_callback, covar_callback=None, background=None, rng=np.ran
         data2 = gmm.draw(size, rng=rng)
     else:
         # model is GMM + Background
-        bg_size = background.amp * size
+        bg_size = int(background.amp * size)
         data2 = np.concatenate((gmm.draw(size-bg_size, rng=rng), background.draw(bg_size, rng=rng)))
 
     # add noise
+    # NOTE: When background is set, adding noise is problematic if
+    # scattering them out is more likely than in.
+    # This can be avoided when the background footprint is large compared to
+    # selection region
     if covar_callback is not None:
         covar2 = covar_callback(data2)
         if covar2.shape == (gmm.D, gmm.D): # one-for-all

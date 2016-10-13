@@ -276,31 +276,28 @@ if __name__ == '__main__':
                                  [[ 0.00258605,  0.00409287],
                                  [ 0.00409287,  0.01065186]]])*100
 
+    # data come from pure GMM model or one with background?
     orig = gmm.draw(N, rng=rng)
-
-    # get observational selection function
-    cb, ps = getSelection("boxWithHole", rng=rng)
-
-    # add isotropic errors on data
-    noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))
-    # apply selection
-    sel = cb(noisy, gmm)
-    noisy = noisy[sel]
-
-    # add uniform background?
-    # NOTE: since background is not clustered,
-    # additive noise is not needed as long as it as also spatially constant
-    if bg_amp > 0:
-        footprint = np.array([-10,-5]), np.array([15,15])
+    if bg_amp == 0:
+        orig_bg = orig
+    else:
+        footprint = np.array([-10,-10]), np.array([20,20])
         bg = pygmmis.Background(footprint)
         bg.amp = bg_amp
         bg.adjust_amp = True
 
-        bg_sample = bg.draw(bg_amp*N, rng=rng)
-        bg_sel = cb(bg_sample, gmm)
-        noisy = np.concatenate((noisy, bg_sample[bg_sel]))
-    else:
-        bg = None
+        bg_size = int(bg_amp/(1-bg_amp) * N)
+        orig_bg = np.concatenate((orig, bg.draw(bg_size, rng=rng)))
+
+    # add isotropic errors on data
+    noisy = orig_bg + rng.normal(0, scale=disp, size=(len(orig_bg), D))
+
+    # get observational selection function
+    cb, ps = getSelection("cut", rng=rng)
+
+    # apply selection
+    sel = cb(noisy, gmm)
+    noisy = noisy[sel]
 
     data = pygmmis.createShared(noisy)
     covar = disp**2 * np.eye(D)
