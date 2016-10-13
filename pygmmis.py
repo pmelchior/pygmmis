@@ -472,10 +472,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
         cutoff_nd = chi2_cutoff(gmm.D, cutoff=cutoff)
 
         # store chi2 cutoff for component shifts, use 0.5 sigma
-        shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.5, cutoff/2))
+        shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.25, cutoff/2))
     else:
         cutoff_nd = None
-        shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.5)
+        shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.25)
 
     it = 0
     maxiter = max(100, gmm.K)
@@ -618,11 +618,12 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
         log_S[:] = 0
         for log_p[k], U[k], T_inv[k] in \
         parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+            log_p[k] += np.log(1-background.amp)
             log_S += np.exp(log_p[k]) # actually S, not logS; need all points here for log_L below
             k += 1
 
         p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
+        q_bg = p_bg / (p_bg + log_S)
         H[:] = q_bg < 0.5
 
         for k in xrange(gmm.K):
@@ -634,7 +635,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
         if VERBOSITY:
             print("BG%d\t%.3f\t%d" % (it, background.amp, (H==0).sum()))
 
-        log_L = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
+        log_L = np.log(log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
 
     return log_L
@@ -699,7 +700,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
 
     if background is not None:
         p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + np.exp(np.log(1-background.amp) + log_S))
+        q_bg = p_bg / (p_bg + np.exp(log_S))
         B = q_bg.sum()
 
     return A,M,C,N,B
@@ -786,7 +787,7 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
         return 0,0,0
 
 
-def _I(gmm, size, sel_callback, covar_callback=None, background=None, rng=np.random):
+def _I(gmm, size, sel_callback, covar_callback=None, background=None, invert_sel=True, rng=np.random):
 
     # draw sample from model no selection (yet)
     if background is None:
@@ -819,7 +820,9 @@ def _I(gmm, size, sel_callback, covar_callback=None, background=None, rng=np.ran
 
     # TODO: may want to decide whether to add noise before selection or after
     # Here we do noise, then selection, but this is not fundamental
-    sel2 = ~sel_callback(data2, gmm=gmm)
+    sel2 = sel_callback(data2, gmm=gmm)
+    if invert_sel:
+        sel2 = ~sel2
     data2 = data2[sel2]
     if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
         covar2 = covar2[sel2]
