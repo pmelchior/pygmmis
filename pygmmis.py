@@ -551,9 +551,10 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
         over = 1
+        # FIXME: imputation needs to attempt to guess true underlying N, not only observed N!
         size = N*over
 
-        data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, rng=rng)
+        data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, background=background, rng=rng)
         N2 = len(data2)
 
         if N2 > 0:
@@ -566,7 +567,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
             log_p2 = [[] for k in xrange(gmm.K)]
             T2_inv = [None for k in xrange(gmm.K)]
 
-            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=None, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
+            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
             A2,M2,C2,N2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, pool=pool, chunksize=chunksize)
 
             sel_outside = A2 > tol * A
@@ -777,10 +778,15 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
         return 0,0,0
 
 
-def _I(gmm, size, sel_callback, covar_callback=None, rng=np.random):
+def _I(gmm, size, sel_callback, covar_callback=None, background=None, rng=np.random):
 
-    # draw sample from GMM, no selection (yet)
-    data2 = gmm.draw(size, rng=rng)
+    # draw sample from model no selection (yet)
+    if background is None:
+        data2 = gmm.draw(size, rng=rng)
+    else:
+        # model is GMM + Background
+        bg_size = background.amp * size
+        data2 = np.concatenate((gmm.draw(size-bg_size, rng=rng), background.draw(bg_size, rng=rng)))
 
     # add noise
     if covar_callback is not None:
