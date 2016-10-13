@@ -405,6 +405,11 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     if covar is not None and sel_callback is not None and covar_callback is None:
         raise RuntimeError("covar is set, but covar_callback is None: imputation samples inconsistent")
 
+    # cutoff cannot be used with background due to competing definitions of neighborhood
+    if background is not None and cutoff is not None:
+        print "adjusting cutoff = None for background model fit"
+        cutoff = None
+
     # set up pool
     import multiprocessing
     pool = multiprocessing.Pool()
@@ -581,8 +586,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
             log_p2 = [[] for k in xrange(gmm.K)]
             T2_inv = [None for k in xrange(gmm.K)]
 
-            # TODO: can we avoid to recompute the model prediction each time for the background H?
-            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=0)
+            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=None, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
             A2,M2,C2,N2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, pool=pool, chunksize=chunksize)
 
             sel_outside = A2 > tol * A
@@ -621,23 +625,6 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
     # signal, it would also underestimated the probabilities under the joint model.
     # Thus, we ignore any cutoff and compute p(x|k) for all x and k
     else:
-        if it == 0:
-            log_S[:] = gmm(data, covar=covar)
-        else:
-            log_S[:] = np.exp(log_S[:])
-
-
-        p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
-        H[:] = q_bg < 0.5
-
-        if VERBOSITY:
-            print("BG%d\t%.3f\t%d" % (it, background.amp, (H==0).sum()))
-
-        # recompute background amplitude;
-        # for flat log_S, this is identical to summing up samplings with H[i]==0
-        if background.adjust_amp:
-            background.amp = min(q_bg.sum() / len(data), background.amp_max)
 
         # reset signal U
         for k in xrange(gmm.K):
@@ -650,14 +637,29 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
         for log_p[k], U[k], T_inv[k] in \
         parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
             log_S += np.exp(log_p[k]) # actually S, not logS; need all points here for log_L below
+            k += 1
+
+        p_bg = background.amp * background.p
+        q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
+        H[:] = q_bg < 0.5
+
+        for k in xrange(gmm.K):
             U[k] = H # shallow copy
             log_p[k] = log_p[k][H]
             if T_inv[k] is not None and T_inv[k].shape != (gmm.D, gmm.D):
                 T_inv[k] = T_inv[k][H]
-            k += 1
+
+        if VERBOSITY:
+            print("BG%d\t%.3f\t%d" % (it, background.amp, (H==0).sum()))
 
         log_L = np.log((1-background.amp) * log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
+
+        # recompute background amplitude;
+        # for flat log_S, this is identical to summing up samplings with H[i]==0
+        if background.adjust_amp:
+            background.amp = min(q_bg.sum() / len(data), background.amp_max)
+
     return log_L
 
 
