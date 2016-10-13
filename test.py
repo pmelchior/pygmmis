@@ -253,7 +253,7 @@ if __name__ == '__main__':
     # set up test
     seed = 8366
     disp = 0.7
-    bg_amp = 0.1
+    bg_amp = 0
     from numpy.random import RandomState
     rng = RandomState(seed)
     pygmmis.VERBOSITY = 1
@@ -279,7 +279,7 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
 
     # get observational selection function
-    cb, ps = getSelection("tapered", rng=rng)
+    cb, ps = getSelection("boxWithHole", rng=rng)
 
     # add isotropic errors on data
     noisy = orig + rng.normal(0, scale=disp, size=(len(orig), D))

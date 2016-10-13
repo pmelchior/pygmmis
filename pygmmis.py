@@ -488,9 +488,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
     gmm_.amp[:] = gmm.amp[:]
     gmm_.mean[:,:] = gmm.mean[:,:]
     gmm_.covar[:,:,:] = gmm.covar[:,:,:]
+    N2 = 0
     while it < maxiter: # limit loop in case of slow convergence
 
-        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
+        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, N2=N2, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -540,19 +541,19 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
     return log_L, N, N2
 
 
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, N2=0, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
 
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
-    A2 = M2 = C2 = N2 = B2 = 0
+    A2 = M2 = C2 = B2 = 0
     if sel_callback is not None:
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
         over = 1
         # FIXME: imputation needs to attempt to guess true underlying N, not only observed N!
-        size = N*over
+        size = (N+N2)*over
 
         data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, background=background, rng=rng)
         N2 = len(data2)
