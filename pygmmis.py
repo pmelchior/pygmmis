@@ -327,6 +327,7 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     gmm.amp[k] = 1./gmm.K
     # initialize components around data points with uncertainty s
     refs = rng.randint(0, len(data), size=k_len)
+    D = data.shape[1]
     if s is None:
         from scipy.special import gamma
         min_pos = data.min(axis=0)
@@ -335,7 +336,7 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
         if VERBOSITY >= 2:
             print "initializing spheres with s=%.2f near data points" % s
-    gmm.mean[k,:] = data[refs] + rng.normal(0, s, size=(k_len, data.shape[1]))
+    gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 # Run a simple GMM to initialize a tricky one:
@@ -580,7 +581,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     return log_L, N, N2
 
 
-def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, pool=None, chunksize=1, cutoff=None, it=0):
+def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
     import parmap
     if background is None:
         # compute p(i | k) for each k independently in the pool
@@ -624,7 +625,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
 
         p_bg = background.amp * background.p
         q_bg = p_bg / (p_bg + log_S)
-        H[:] = q_bg < 0.5
+        H[:] = q_bg < rng.rand(len(data)) # 0.5
 
         for k in xrange(gmm.K):
             U[k] = H # shallow copy
@@ -633,7 +634,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
                 T_inv[k] = T_inv[k][H]
 
         if VERBOSITY:
-            print("BG%d\t%.3f\t%d" % (it, background.amp, (H==0).sum()))
+            print("BG%d\t%d\t%d\t%.3f" % (it, len(H), (H==0).sum(), background.amp))
 
         log_L = np.log(log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
