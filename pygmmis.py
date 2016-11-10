@@ -167,6 +167,13 @@ class GMM(object):
         """
         np.savez(filename, amp=self.amp, mean=self.mean, covar=self.covar, **kwargs)
 
+    def load(self, filename):
+        F = np.load(filename)
+        self.amp = F["amp"]
+        self.mean = F["mean"]
+        self.covar = F["covar"]
+        F.close()
+
     def draw(self, size=1, sel_callback=None, invert_callback=False, rng=np.random):
         # draw indices for components given amplitudes, need to make sure: sum=1
         ind = rng.choice(self.K, size=size, p=self.amp/self.amp.sum())
