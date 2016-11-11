@@ -554,7 +554,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
-    A2 = M2 = C2 = B2 = 0
+    A2 = M2 = C2 = B2 = H2 = 0
     if sel_callback is not None:
 
         # create fake data with same mechanism as the original data,
@@ -567,10 +567,6 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         N2 = len(data2)
 
         if N2 > 0:
-            A2 = np.zeros(gmm.K)
-            M2 = np.zeros((gmm.K, gmm.D))
-            C2 = np.zeros((gmm.K, gmm.D, gmm.D))
-
             log_S2 = np.zeros(len(data2))
             H2 = np.zeros(len(data2), dtype='bool')
             log_p2 = [[] for k in xrange(gmm.K)]
@@ -583,7 +579,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
             if VERBOSITY >= 2 and sel_outside.any():
                 print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
-    _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, altered=altered, background=background)
+    _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=altered, background=background)
 
     return log_L, N, N2
 
@@ -626,13 +622,12 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
         log_S[:] = 0
         for log_p[k], U[k], T_inv[k] in \
         parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
-            log_p[k] += np.log(1-background.amp)
             log_S += np.exp(log_p[k]) # actually S, not logS; need all points here for log_L below
             k += 1
 
         p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + log_S)
-        H[:] = q_bg < rng.rand(len(data)) # 0.5
+        q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
+        H[:] = q_bg < 0.5# rng.rand(len(data)) # 0.5
 
         for k in xrange(gmm.K):
             U[k] = H # shallow copy
@@ -643,7 +638,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
         if VERBOSITY:
             print("BG%d\t%d\t%d\t%.3f" % (it, len(H), (H==0).sum(), background.amp))
 
-        log_L = np.log(log_S + background.amp * background.p).mean()
+        log_L = np.log((1-background.amp)*log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
 
     return log_L
@@ -708,13 +703,13 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
 
     if background is not None:
         p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + np.exp(log_S))
+        q_bg = p_bg / (p_bg + (1-background.amp)*np.exp(log_S))
         B = q_bg.sum()
 
     return A,M,C,N,B
 
 
-def _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, altered=None, background=None):
+def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=None, background=None):
     # M-step for all components using data (and data2, if non-zero sums are set)
 
     # partial EM: normal update for mean and covar, but constrained for amp
@@ -746,9 +741,12 @@ def _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, altered=None, background=
         gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
 
     # recompute background amplitude;
-    # for flat log_S, this is identical to summing up samplings with H[i]==0
+    # since B is computed over all samples, not just signal portion, need H.size
     if background is not None and background.adjust_amp:
-        background.amp = min((B + B2) / (N + N2), background.amp_max)
+        if H2 is 0:
+            background.amp = min(B / H.size, background.amp_max)
+        else:
+            background.amp = min((B + B2) / (H.size + H2.size), background.amp_max)
 
 
 def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
