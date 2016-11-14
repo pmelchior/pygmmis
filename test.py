@@ -253,6 +253,7 @@ if __name__ == '__main__':
     cutoff = 5          # cutoff distance between components [sigma]
     seed = 8366         # seed value
     pygmmis.VERBOSITY = 1
+    pygmmis.OVERSAMPLING = 10
 
     # define RNG for run
     from numpy.random import RandomState

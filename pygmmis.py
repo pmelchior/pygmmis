@@ -1,3 +1,4 @@
+from __future__ import division
 import numpy as np
 import ctypes
 
@@ -207,8 +208,8 @@ class GMM(object):
     def _mp_chunksize(self):
         import multiprocessing
         cpu_count = multiprocessing.cpu_count()
-        chunksize = max(1, self.K/cpu_count)
-        n_chunks = min(cpu_count, self.K/chunksize)
+        chunksize = max(1, self.K//cpu_count)
+        n_chunks = min(cpu_count, self.K//chunksize)
         return n_chunks, chunksize
 
     def _get_chunks(self):
@@ -289,7 +290,7 @@ class Background(object):
     @property
     def p(self):
         volume = np.prod(self.footprint[1] - self.footprint[0])
-        return 1./volume
+        return 1/volume
 
     def draw(self, size=1, rng=np.random):
         dx = self.footprint[1] - self.footprint[0]
@@ -301,11 +302,12 @@ class Background(object):
 ############################
 
 VERBOSITY = False
+OVERSAMPLING = 4
 
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if k is None:
         k = slice(None)
-    gmm.amp[k] = 1./gmm.K
+    gmm.amp[k] = 1/gmm.K
     # set model to random positions with equally sized spheres within
     # volumne spanned by data
     min_pos = data.min(axis=0)
@@ -317,7 +319,7 @@ def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     if s is None:
         from scipy.special import gamma
         vol_data = np.prod(max_pos-min_pos)
-        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
+        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
         if VERBOSITY >= 2:
             print "initializing spheres with s=%.2f in data domain" % s
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
@@ -331,7 +333,7 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
             k_len = len(gmm.amp[k])
         except TypeError:
             k_len = 1
-    gmm.amp[k] = 1./gmm.K
+    gmm.amp[k] = 1/gmm.K
     # initialize components around data points with uncertainty s
     refs = rng.randint(0, len(data), size=k_len)
     D = data.shape[1]
@@ -340,7 +342,7 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
         min_pos = data.min(axis=0)
         max_pos = data.max(axis=0)
         vol_data = np.prod(max_pos-min_pos)
-        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1./gmm.D) / np.sqrt(np.pi)
+        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
         if VERBOSITY >= 2:
             print "initializing spheres with s=%.2f near data points" % s
     gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
@@ -372,7 +374,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
     center, label = kmeans2(data, gmm.K)
     for k in xrange(gmm.K):
         mask = (label == k)
-        gmm.amp[k] = mask.sum() * 1./len(data)
+        gmm.amp[k] = mask.sum() / len(data)
         gmm.mean[k,:] = data[mask].mean(axis=0)
         d_m = data[mask] - gmm.mean[k]
         # funny way of saying: for each point i, do the outer product
@@ -561,10 +563,9 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=N
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        over = 10
-        data2, covar2, N0 = _I(gmm, sel_callback, len(data)*over, orig_size=N0*over, covar_callback=covar_callback, background=background, rng=rng)
+        data2, covar2, N0 = _I(gmm, sel_callback, len(data)*OVERSAMPLING, orig_size=N0*OVERSAMPLING, covar_callback=covar_callback, background=background, rng=rng)
         U2 = [None for k in xrange(gmm.K)]
-        N0 = int(N0*1./over)
+        N0 = int(N0/OVERSAMPLING)
 
         if len(data2) > 0:
             log_S2 = np.zeros(len(data2))
@@ -576,11 +577,11 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=N
             A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
             # normalize foer oversampling
-            A2 /= over
-            M2 /= over
-            C2 /= over
-            B2 /= over
-            N2 = 1./over * N2 # need floating point precision in update
+            A2 /= OVERSAMPLING
+            M2 /= OVERSAMPLING
+            C2 /= OVERSAMPLING
+            B2 /= OVERSAMPLING
+            N2 = N2/OVERSAMPLING # need floating point precision in update
 
             # check which components are predominantly outside selection
             sel_outside = A2 > tol * A
@@ -743,7 +744,7 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=None, back
         # then eq. 38 in Bovy et al. only ~works for N = 0 because of the
         # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
         # On average, q_j = N/K, so we'll adopt that to correct.
-        w_eff = w**2 * ((N+N2)*1./gmm.K + 1)
+        w_eff = w**2 * ((N+N2)/gmm.K + 1)
         gmm.covar[changed,:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changed,:,:] / (A + A2 + 1)[changed,None,None]
     else:
         gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
@@ -855,7 +856,7 @@ def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, backgro
     obs_size_ = sel2.sum()
     it = 0
     while obs_size_ > upper or obs_size_ < lower:
-        orig_size = int(orig_size * 1./obs_size_ * obs_size)
+        orig_size = int(orig_size / obs_size_ * obs_size)
         data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
         sel2 = sel_callback(data2)
         obs_size_ = sel2.sum()
@@ -980,7 +981,7 @@ def _update_snm(gmm, altered, U, N, cleanup):
     dl = np.sqrt(radius2[0]) *  rotation[0] / 4
     gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
     gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
-    gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1./gmm.D) * np.eye(gmm.D)
+    gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1/gmm.D) * np.eye(gmm.D)
     U[altered[1]] = U[altered[2]].copy() # now 1 and 2 have same U
 
 
