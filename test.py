@@ -182,39 +182,31 @@ def getCoverage(gmm, coords, sel_callback=None, repeat=10, rotate=True):
             coverage[inv_sel] = outside_cov
     return coverage
 
-def getBox(coords, gmm=None):
+def getBox(coords):
     box_limits = np.array([[0,0],[10,10]])
     return (coords[:,0] > box_limits[0,0]) & (coords[:,0] < box_limits[1,0]) & (coords[:,1] > box_limits[0,1]) & (coords[:,1] < box_limits[1,1])
 
-def getHole(coords, gmm=None):
+def getHole(coords):
     x,y,r = 6.5, 6., 2
     return ((coords[:,0] - x)**2 + (coords[:,1] - y)**2 > r**2)
 
-def getBoxWithHole(coords, gmm=None):
+def getBoxWithHole(coords):
     return getBox(coords)*getHole(coords)
 
-def getHalfDensity(coords, gmm=None, rng=np.random):
+def getHalfDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
     mask[rng.rand(coords.shape[0]) < 0.5] = 0
     return mask
 
-def getTaperedDensity(coords, gmm=None, rng=np.random):
+def getTaperedDensity(coords, rng=np.random):
     mask = np.ones(coords.shape[0], dtype='bool')
     mask[rng.rand(coords.shape[0]) < coords[:,0]/8] = 0
     return mask
 
-def getCut(coords, gmm=None):
+def getCut(coords):
     return (coords[:,0] < 6)
 
-def getOver(coords, gmm):
-    p_x = gmm(coords)
-    return p_x > 0.01
-
-def getUnder(coords, gmm):
-    p_x = gmm(coords)
-    return p_x < 0.025
-
-def getAll(coords, gmm):
+def getAll(coords):
     return np.ones(len(coords), dtype='bool')
 
 def getSelection(type="hole", rng=np.random):
@@ -251,17 +243,22 @@ def getCovar(data, disp=1):
 if __name__ == '__main__':
 
     # set up test
-    seed = 8366
-    disp = 0.7
-    bg_amp = 0
+    N = 400             # number of samples
+    K = 3               # number of components
+    R = 1               # number of runs
+    sel_type = "boxWithHole"    # type of selection
+    disp = 0.7          # additive noise dispersion
+    bg_amp = 0.0        # fraction of background samples
+    w = 0.1             # minimum covariance regularization [data units]
+    cutoff = 5          # cutoff distance between components [sigma]
+    seed = 8366         # seed value
+    pygmmis.VERBOSITY = 1
+
+    # define RNG for run
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pygmmis.VERBOSITY = 1
-    w = 0.1
-    cutoff = 5
 
     # draw N points from 3-component GMM
-    N = 400
     D = 2
     gmm = pygmmis.GMM(K=3, D=2)
     gmm.amp[:] = np.array([ 0.36060026,  0.27986906,  0.206774])
@@ -280,6 +277,7 @@ if __name__ == '__main__':
     orig = gmm.draw(N, rng=rng)
     if bg_amp == 0:
         orig_bg = orig
+        bg = None
     else:
         footprint = np.array([-10,-10]), np.array([20,20])
         bg = pygmmis.Background(footprint)
@@ -293,10 +291,10 @@ if __name__ == '__main__':
     noisy = orig_bg + rng.normal(0, scale=disp, size=(len(orig_bg), D))
 
     # get observational selection function
-    cb, ps = getSelection("cut", rng=rng)
+    cb, ps = getSelection(sel_type, rng=rng)
 
     # apply selection
-    sel = cb(noisy, gmm)
+    sel = cb(noisy)
     noisy = noisy[sel]
 
     data = pygmmis.createShared(noisy)
@@ -306,8 +304,6 @@ if __name__ == '__main__':
     plotResults(orig, data, gmm, patch=ps, description="Truth")
 
     # repeated runs: store results and logL
-    K = 3
-    R = 1
     l = np.empty(R)
     gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(R)]
     covar_cb = partial(getCovar, disp=disp)
@@ -318,7 +314,7 @@ if __name__ == '__main__':
     for r in xrange(R):
         if bg is not None:
             bg.amp = bg_amp
-        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataMinMax, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, patch=ps, description="standard\ EM")
@@ -329,7 +325,7 @@ if __name__ == '__main__':
     # volume that is spanned by the missing part of the data
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4.)
+    init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., rng=rng)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):

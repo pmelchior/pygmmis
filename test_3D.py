@@ -89,10 +89,10 @@ def plotPoints(coords, ax=None, depth_shading=True, **kwargs):
     plt.show()
     return ax
 
-def slopeSel(coords, gmm=None, rng=np.random):
+def slopeSel(coords, rng=np.random):
     return rng.rand(len(coords)) > coords[:,0]
 
-def noSel(coords, gmm=None, rng=np.random):
+def noSel(coords, rng=np.random):
     return np.ones(len(coords), dtype="bool")
 
 def insideComponent(k, gmm, coords, covar=None, cutoff=5.):
@@ -101,7 +101,7 @@ def insideComponent(k, gmm, coords, covar=None, cutoff=5.):
     else:
         return np.zeros(len(coords), dtype='bool')
 
-def GMMSel(coords, gmm=None, covar=None, sel_gmm=None, cutoff_nd=3., rng=np.random):
+def GMMSel(coords, gmm, covar=None, sel_gmm=None, cutoff_nd=3., rng=np.random):
     # swiss cheese selection based on a GMM:
     # if within 1 sigma of any component: you're out!
     import multiprocessing, parmap

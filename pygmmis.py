@@ -844,7 +844,7 @@ def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, backgro
     data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
 
     # apply selection
-    sel2 = sel_callback(data2, gmm=gmm)
+    sel2 = sel_callback(data2)
 
     # check if predicted observed size is consistent with observed data
     # 68% confidence interval for Poisson variate: observed size
@@ -857,7 +857,7 @@ def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, backgro
     while obs_size_ > upper or obs_size_ < lower:
         orig_size = int(orig_size * 1./obs_size_ * obs_size)
         data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
-        sel2 = sel_callback(data2, gmm=gmm)
+        sel2 = sel_callback(data2)
         obs_size_ = sel2.sum()
         it += 1
         if it > 10:
