@@ -560,10 +560,8 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
         over = 1
-        # FIXME: imputation needs to attempt to guess true underlying N, not only observed N!
-        size = int((N+N2)*over)
-
-        data2, covar2, U2 = _I(gmm, size, sel_callback, covar_callback=covar_callback, background=background, rng=rng)
+        size = len(data)*over # will estimate original sample size
+        data2, covar2, U2 = _I(gmm, size, sel_callback, estimate_size=True, covar_callback=covar_callback, background=background, rng=rng)
         N2 = len(data2)
 
         if N2 > 0:
@@ -627,7 +625,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
 
         p_bg = background.amp * background.p
         q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
-        H[:] = q_bg < 0.5# rng.rand(len(data)) # 0.5
+        H[:] = q_bg < rng.rand(len(data)) # 0.5
 
         for k in xrange(gmm.K):
             U[k] = H # shallow copy
@@ -793,7 +791,25 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
         return 0,0,0
 
 
-def _I(gmm, size, sel_callback, covar_callback=None, background=None, invert_sel=True, rng=np.random):
+def _I(gmm, size, sel_callback, estimate_size=False, covar_callback=None, background=None, invert_sel=True, rng=np.random):
+
+    # if size is not set: estimate original number prior to selection
+    # TODO: save an estimate for next iteration in _EMstep
+    # TODO: split _I into sample draing plus covariance and selection
+    # then test for the correct size of the unmasked data set , and adjust only if needed
+    if estimate_size:
+        # 68% confidence interval for Poisson variate size (i.e. observed)
+        alpha = 0.32
+        from scipy.stats import chi2
+        lower = 0.5*chi2.ppf(alpha/2, 2*size)
+        upper = 0.5*chi2.ppf(1 - alpha/2, 2*size + 2)
+        N_ = int(size)
+        while True:
+            data2, covar2, U2 = _I(gmm, N_, sel_callback, covar_callback=covar_callback, background=background, invert_sel=False)
+            if len(data2) >= lower and len(data2) <= upper:
+                break
+            N_ = int((N_*1./len(data2)) * size)
+        size = N_
 
     # draw sample from model no selection (yet)
     if background is None:
