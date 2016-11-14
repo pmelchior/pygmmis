@@ -489,24 +489,26 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
     maxiter = max(100, gmm.K)
     if VERBOSITY:
         global VERB_BUFFER
-        print("\nITER\tPOINTS\tIMPUTED\tLOG_L\tSTABLE")
+        print("\nITER\tPOINTS\tIMPUTED\tORIG\tLOG_L\tSTABLE")
 
     # save backup
     gmm_ = GMM(gmm.K, gmm.D)
     gmm_.amp[:] = gmm.amp[:]
     gmm_.mean[:,:] = gmm.mean[:,:]
     gmm_.covar[:,:,:] = gmm.covar[:,:,:]
-    N2 = 0
+    N0 = len(data) # size of original (unobscured) data set (signal and background)
+    N2 = 0         # size of imputed signal sample
+
     while it < maxiter: # limit loop in case of slow convergence
 
-        log_L_, N, N2 = _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, N2=N2, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
+        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
         moved = np.flatnonzero(shift2 > shift_cutoff)
 
         if VERBOSITY:
-            print("%s%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, log_L_, gmm.K - moved.size))
+            print("%s%d\t%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, N0, log_L_, gmm.K - moved.size))
 
         # convergence tests:
         if it > 0 and log_L_ < log_L + tol:
@@ -549,22 +551,22 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
     return log_L, N, N2
 
 
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, N2=0, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
 
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
-    A2 = M2 = C2 = B2 = H2 = 0
+    A2 = M2 = C2 = B2 = H2 = N2 = 0
     if sel_callback is not None:
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        over = 1
-        size = len(data)*over # will estimate original sample size
-        data2, covar2, U2 = _I(gmm, size, sel_callback, estimate_size=True, covar_callback=covar_callback, background=background, rng=rng)
-        N2 = len(data2)
+        over = 10
+        data2, covar2, N0 = _I(gmm, sel_callback, len(data)*over, orig_size=N0*over, covar_callback=covar_callback, background=background, rng=rng)
+        U2 = [None for k in xrange(gmm.K)]
+        N0 = int(N0*1./over)
 
-        if N2 > 0:
+        if len(data2) > 0:
             log_S2 = np.zeros(len(data2))
             H2 = np.zeros(len(data2), dtype='bool')
             log_p2 = [[] for k in xrange(gmm.K)]
@@ -573,13 +575,21 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None,
             log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
             A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
+            # normalize foer oversampling
+            A2 /= over
+            M2 /= over
+            C2 /= over
+            B2 /= over
+            N2 = 1./over * N2 # need floating point precision in update
+
+            # check which components are predominantly outside selection
             sel_outside = A2 > tol * A
             if VERBOSITY >= 2 and sel_outside.any():
                 print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
     _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=altered, background=background)
 
-    return log_L, N, N2
+    return log_L, N, N2, N0
 
 
 def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
@@ -688,7 +698,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
     M = np.empty((gmm.K, gmm.D))        # ... means
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
     N = H.sum()
-    B = None
+    B = 0
 
     # perform sums for M step in the pool
     # NOTE: in a partial run, could work on altered components only;
@@ -791,27 +801,8 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
         return 0,0,0
 
 
-def _I(gmm, size, sel_callback, estimate_size=False, covar_callback=None, background=None, invert_sel=True, rng=np.random):
-
-    # if size is not set: estimate original number prior to selection
-    # TODO: save an estimate for next iteration in _EMstep
-    # TODO: split _I into sample draing plus covariance and selection
-    # then test for the correct size of the unmasked data set , and adjust only if needed
-    if estimate_size:
-        # 68% confidence interval for Poisson variate size (i.e. observed)
-        alpha = 0.32
-        from scipy.stats import chi2
-        lower = 0.5*chi2.ppf(alpha/2, 2*size)
-        upper = 0.5*chi2.ppf(1 - alpha/2, 2*size + 2)
-        N_ = int(size)
-        while True:
-            data2, covar2, U2 = _I(gmm, N_, sel_callback, covar_callback=covar_callback, background=background, invert_sel=False)
-            if len(data2) >= lower and len(data2) <= upper:
-                break
-            N_ = int((N_*1./len(data2)) * size)
-        size = N_
-
-    # draw sample from model no selection (yet)
+def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
+    # draw sample from model, or from background+model
     if background is None:
         data2 = gmm.draw(size, rng=rng)
     else:
@@ -839,22 +830,66 @@ def _I(gmm, size, sel_callback, estimate_size=False, covar_callback=None, backgr
         data2 += noise
     else:
         covar2 = None
+    return data2, covar2
 
+
+def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, background=None, invert_sel=True, rng=np.random):
+
+    if orig_size is None:
+        orig_size = int(obs_size)
+
+    # draw from model (with background) and add noise.
     # TODO: may want to decide whether to add noise before selection or after
     # Here we do noise, then selection, but this is not fundamental
+    data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
+
+    # apply selection
     sel2 = sel_callback(data2, gmm=gmm)
+
+    # check if predicted observed size is consistent with observed data
+    # 68% confidence interval for Poisson variate: observed size
+    from scipy.stats import chi2
+    alpha = 0.32
+    lower = 0.5*chi2.ppf(alpha/2, 2*obs_size)
+    upper = 0.5*chi2.ppf(1 - alpha/2, 2*obs_size + 2)
+    obs_size_ = sel2.sum()
+    it = 0
+    while obs_size_ > upper or obs_size_ < lower:
+        orig_size = int(orig_size * 1./obs_size_ * obs_size)
+        data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
+        sel2 = sel_callback(data2, gmm=gmm)
+        obs_size_ = sel2.sum()
+        it += 1
+        if it > 10:
+            raise SystemExit
+
     if invert_sel:
         sel2 = ~sel2
     data2 = data2[sel2]
     if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
         covar2 = covar2[sel2]
 
+
+    return data2, covar2, orig_size
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     # determine U of each component:
     # we could check overlap within cutoff of the gmm means with other components
     # but this method does not account for added noise that could "connect"
     # two otherwise disjoint components.
     # We therefore simple set the uninformative neighborhood = None
-    U2 = [None for k in xrange(gmm.K)]
     return data2, covar2, U2
 
 
