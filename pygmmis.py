@@ -870,34 +870,14 @@ def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, backgro
     if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
         covar2 = covar2[sel2]
 
-
     return data2, covar2, orig_size
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # determine U of each component:
-    # we could check overlap within cutoff of the gmm means with other components
-    # but this method does not account for added noise that could "connect"
-    # two otherwise disjoint components.
-    # We therefore simple set the uninformative neighborhood = None
-    return data2, covar2, U2
 
 
 def _JS(k, gmm, log_p, log_S, U, A):
     # compute Kullback-Leiber divergence
     log_q_k = log_p[k] - log_S[U[k]]
     return np.dot(np.exp(log_q_k), log_q_k - np.log(A[k]) - log_p[k] + np.log(gmm.amp[k])) / A[k]
+
 
 def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     # find those components that are most similar
@@ -953,6 +933,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
         else:
             altered[2] = split_l3[2]
     return altered, cleanup
+
 
 def _update_snm(gmm, altered, U, N, cleanup):
     # reconstruct A from gmm.amp
@@ -1040,6 +1021,7 @@ def cv_fit(gmm, data, L=10, **kwargs):
 
     return lcv
 
+
 def stack(gmms, weights):
     # build stacked model by combining all gmms and applying weights to amps
     stacked = GMM(K=0, D=gmms[0].D)
@@ -1049,6 +1031,7 @@ def stack(gmms, weights):
         stacked.covar = np.concatenate((stacked.covar[:,:,:], gmms[m].covar[:,:,:]))
     stacked.amp /= stacked.amp.sum()
     return stacked
+
 
 def stack_fit(gmms, data, kwargs, L=10, tol=1e-5, rng=np.random):
     M = len(gmms)
