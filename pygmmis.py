@@ -2,9 +2,19 @@ from __future__ import division
 import numpy as np
 import ctypes
 
-# for multiprocessing: use shared arrays to avoid copies for each thread
-# http://stackoverflow.com/questions/5549190/
 def createShared(a, dtype=ctypes.c_double):
+    """Create a shared array to be used for multiprocessing's processes.
+
+    Taken from http://stackoverflow.com/questions/5549190/
+
+    Works only for float, double, int, long types (e.g. no bool).
+
+    Args:
+        numpy array, arbitrary shape
+
+    Returns:
+        numpy array whose container is a multiprocessing.Array
+    """
     import multiprocessing
     shared_array_base = multiprocessing.Array(dtype, a.size)
     shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
@@ -132,7 +142,19 @@ def logsum(logX, axis=0):
 
 
 def chi2_cutoff(D, cutoff=3.):
-    # compute effective cutoff for chi2 in D dimensions
+    """D-dimensional eqiuvalent of "n sigma" cut.
+
+    Evaluates the quantile function of the chi-squared distribution to determine
+    the limit for the chi^2 of samples wrt to GMM so that they satisfy the
+    68-95-99.7 percent rule of the 1D Normal distribution.
+
+    Args:
+        D: dimensions of the feature space
+        cutoff: 1D equivalent cut [in units of sigma]
+
+    Returns:
+        float
+    """
     import scipy.stats
     cdf_1d = scipy.stats.norm.cdf(cutoff)
     confidence_1d = 1-(1-cdf_1d)*2
