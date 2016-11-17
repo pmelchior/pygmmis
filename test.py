@@ -9,7 +9,7 @@ import matplotlib.cm
 import datetime
 from functools import partial
 
-def plotResults(orig, data, gmm, patch=None, description=None):
+def plotResults(orig, data, gmm, patch=None, description=None, disp=None):
     fig = plt.figure(figsize=(6,6))
     ax = fig.add_subplot(111, aspect='equal')
 
@@ -46,6 +46,17 @@ def plotResults(orig, data, gmm, patch=None, description=None):
         ax.text(0.05, 0.9, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
     else:
         ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
+
+    # show size of error dispersion as Circle
+    if disp is not None:
+
+        circ1 = patches.Circle((12.5, -2.5), radius=disp, fc='b', ec='None', alpha=0.5)
+        circ2 = patches.Circle((12.5, -2.5), radius=2*disp, fc='b', ec='None', alpha=0.3)
+        circ3 = patches.Circle((12.5, -2.5), radius=3*disp, fc='b', ec='None', alpha=0.1)
+        ax.add_artist(circ1)
+        ax.add_artist(circ2)
+        ax.add_artist(circ3)
+        ax.text(12.5, -2.5, r'$\sigma$', color='w', fontsize=16, ha='center', va='center')
 
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
@@ -302,7 +313,7 @@ if __name__ == '__main__':
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
-    plotResults(orig, data, gmm, patch=ps, description="Truth")
+    plotResults(orig, data, gmm, patch=ps, description="Truth", disp=disp)
 
     # repeated runs: store results and logL
     l = np.empty(R)
