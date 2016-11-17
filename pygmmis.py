@@ -121,8 +121,8 @@ def logsum(logX, axis=0):
     See appendix A of Bovy, Hogg, Roweis (2009).
 
     Args:
-        logX: array of logarithmic summands
-        axis: axis to sum over
+        logX: numpy array of logarithmic summands
+        axis (int): axis to sum over
 
     Returns:
         log of the sum, shortened by one axis
@@ -149,11 +149,11 @@ def chi2_cutoff(D, cutoff=3.):
     68-95-99.7 percent rule of the 1D Normal distribution.
 
     Args:
-        D: dimensions of the feature space
-        cutoff: 1D equivalent cut [in units of sigma]
+        D (int): dimensions of the feature space
+        cutoff (float): 1D equivalent cut [in units of sigma]
 
     Returns:
-        float
+        float: upper limit for chi-squared in D dimensions
     """
     import scipy.stats
     cdf_1d = scipy.stats.norm.cdf(cutoff)
@@ -163,41 +163,69 @@ def chi2_cutoff(D, cutoff=3.):
 
 
 class GMM(object):
-    def __init__(self, K=1, D=1):
+    """Gaussian mixture model with K components in D dimensions.
+
+    Attributes:
+        amp: numpy array (K,), component amplitudes
+        mean: numpy array (K,D), component means
+        covar: numpy array (K,D,D), component covariances
+    """
+    def __init__(self, K=0, D=0):
+        """Create the arrays for amp, mean, covar."""
         self.amp = np.zeros((K))
         self.mean = np.empty((K,D))
         self.covar = np.empty((K,D,D))
 
     @property
     def K(self):
+        """int: number of components, depends on size of amp."""
         return self.amp.size
 
     @property
     def D(self):
+        """int: dimensions of the feature space."""
         return self.mean.shape[1]
 
     def save(self, filename, **kwargs):
         """Save GMM to file.
 
         Args:
-            filename: name for saved file, should end on .npz as the default
-                      of numpy.savez(), which is called here
-            kwargs:   dictionary of additional information to be stored
-                      in the file. Whatever is stored in kwargs, will be loaded
-                      into ZDFileInfo.
+            filename (str): name for saved file, should end on .npz as the default
+                of numpy.savez(), which is called here
+            kwargs:  dictionary of additional information to be stored in file.
+
         Returns:
             None
         """
         np.savez(filename, amp=self.amp, mean=self.mean, covar=self.covar, **kwargs)
 
     def load(self, filename):
+        """Load GMM from file.
+
+        Additional arguments stored by save() will be ignored.
+
+        Args:
+            filename (str): name for file create with save().
+
+        Returns:
+            None
+        """
         F = np.load(filename)
         self.amp = F["amp"]
         self.mean = F["mean"]
         self.covar = F["covar"]
         F.close()
 
-    def draw(self, size=1, sel_callback=None, invert_callback=False, rng=np.random):
+    def draw(self, size=1, rng=np.random):
+        """Draw samples from the GMM.
+
+        Args:
+            size (int): number of samples to draw
+            rng: numpy.random.RandomState for deterministic draw
+
+        Returns:
+            numpy array (size,D)
+        """
         # draw indices for components given amplitudes, need to make sure: sum=1
         ind = rng.choice(self.K, size=size, p=self.amp/self.amp.sum())
         N = np.bincount(ind, minlength=self.K)
@@ -209,25 +237,28 @@ class GMM(object):
             upper = lower + N[k]
             samples[lower:upper, :] = rng.multivariate_normal(self.mean[k], self.covar[k], size=N[k])
             lower = upper
-
-        # if subsample with selection is required
-        if sel_callback is not None:
-            sel_ = sel_callback(samples)
-            if invert_callback:
-                sel_ = np.invert(sel_)
-            size_in = sel_.sum()
-            if size_in != size:
-                ssamples = self.draw(size=size-size_in, sel_callback=sel_callback, invert_callback=invert_callback, rng=rng)
-                samples = np.concatenate((samples[sel_], ssamples))
         return samples
 
-    def __call__(self, coords, covar=None, relevant=None, as_log=False):
+    def __call__(self, coords, covar=None, as_log=False):
+        """Evaluate model PDF at given coordinates.
+
+        see logL() for details.
+
+        Args:
+            coords: numpy array (D,) or (N, D) of test coordinates
+            covar:  numpy array (D, D) or (N, D, D) covariance matrix of coords
+            as_log (bool): return log(p) instead p
+
+        Returns:
+            numpy array (1,) or (N, 1) of PDF (or its log)
+        """
         if as_log:
-            return self.logL(coords, covar=covar, relevant=relevant)
+            return self.logL(coords, covar=covar)
         else:
-            return np.exp(self.logL(coords, covar=covar, relevant=relevant))
+            return np.exp(self.logL(coords, covar=covar))
 
     def _mp_chunksize(self):
+        # find how many components to distribute over available threads
         import multiprocessing
         cpu_count = multiprocessing.cpu_count()
         chunksize = max(1, self.K//cpu_count)
@@ -235,6 +266,7 @@ class GMM(object):
         return n_chunks, chunksize
 
     def _get_chunks(self):
+        # split all component in ideal-sized chunks
         n_chunks, chunksize = self._mp_chunksize()
         left = self.K - n_chunks*chunksize
         chunks = []
@@ -247,8 +279,10 @@ class GMM(object):
             n = n_
         return chunks
 
-    def logL(self, coords, covar=None, relevant=None):
-        """Log-likelihood of data given all (i.e. the sum of) GMM components
+    def logL(self, coords, covar=None):
+        """Log-likelihood of coords given all (i.e. the sum of) GMM components
+
+        Distributes computation over all threads on the machine.
 
         If covar is None, this method returns
             log(sum_k(p(x | k)))
@@ -257,13 +291,11 @@ class GMM(object):
         where y = x + noise and noise ~ N(0, covar).
 
         Args:
-            coords: (D,) or (N, D) test coordinates
-            covar:  (D, D) or (N, D, D) covariance matrix of data
-            relevant: iterable of components relevant for data points
-                      see getRelevantComponents()
+            coords: numpy array (D,) or (N, D) of test coordinates
+            covar:  numpy array (D, D) or (N, D, D) covariance matrix of coords
 
         Returns:
-            (1,) or (N, 1) log(L), depending on shape of data
+            numpy array (1,) or (N, 1) log(L), depending on shape of data
         """
         # Instead log p (x | k) for each k (which is huge)
         # compute it in stages: first for each chunk, then sum over all chunks
@@ -286,6 +318,17 @@ class GMM(object):
         return logsum(log_p_y_k)
 
     def logL_k(self, k, coords, covar=None, chi2_only=False):
+        """Log-likelihood of coords given only component k.
+
+        Args:
+            k (int): component index
+            coords: numpy array (D,) or (N, D) of test coordinates
+            covar:  numpy array (D, D) or (N, D, D) covariance matrix of coords
+            chi2_only (bool): only compute deltaX^T Sigma_k^-1 deltaX
+
+        Returns:
+            numpy array (1,) or (N, 1) log(L), depending on shape of data
+        """
         # compute p(x | k)
         dx = coords - self.mean[k]
         if covar is None:
