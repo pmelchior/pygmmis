@@ -552,7 +552,39 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
 
 
 def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callback=None, init_callback=None, background=None, tol=1e-3, split_n_merge=False, rng=np.random):
-    # NOTE: If background is set, it implies cutoff=None
+    """Fit GMM to data.
+
+    If given, init_callback is called to set up the GMM components. Then, the
+    EM sequence is repeated until the mean log-likelihood converges within tol.
+
+    VERBOSITY controls output during the EM steps [0,1,2]
+    OVERSAMPLING defines the number if imputation samples per data sample.
+        Value of 1 is fine but may become instable. Set as high as feasible.
+
+    Note:
+        If background is set, it implies cutoff=None.
+
+    Args:
+        gmm: an instance if GMM
+        data: numpy array (N,D)
+        covar: numpy array (N,D,D) or (D,D) if i.i.d.
+        w (float): minimum covariance regularization
+        cutoff (float): size of component neighborhood [in 1D equivalent sigmas]
+        sel_callback: completeness callback to generate imputation samples.
+        covar_callback: covariance callback for imputation samples.
+            needs to be present if sel_callback and covar are set.
+        init_callback: callback to initialize the components
+        background: an instance of Background if simultaneous fitting is desired
+        tol (float): tolerance for covergence of mean log-likelihood
+        split_n_merge (int): number of split & merge attempts
+        rng: numpy.random.RandomState for deterministic behavior
+
+    Returns:
+        mean log-likelihood (float), component neighborhoods (list of ints)
+
+    Throws:
+        RuntimeError for inconsistent argument combinations
+    """
 
     # init components
     if init_callback is not None:
@@ -1023,15 +1055,11 @@ def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, backgro
     lower = 0.5*chi2.ppf(alpha/2, 2*obs_size)
     upper = 0.5*chi2.ppf(1 - alpha/2, 2*obs_size + 2)
     obs_size_ = sel2.sum()
-    it = 0
     while obs_size_ > upper or obs_size_ < lower:
         orig_size = int(orig_size / obs_size_ * obs_size)
         data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
         sel2 = sel_callback(data2)
         obs_size_ = sel2.sum()
-        it += 1
-        if it > 10:
-            raise SystemExit
 
     if invert_sel:
         sel2 = ~sel2
