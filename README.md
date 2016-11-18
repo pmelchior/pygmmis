@@ -95,9 +95,18 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    w = 0.1    # minimum covariance regularization, same units as data
    cutoff = 5 # segment the data set into neighborhood within 5 sigma around components
    tol = 1e-3 # tolerance on logL to terminate EM
-   pygmmis.VERBOSITY = 1      # 0 .. 2
-   pygmmis.OVERSAMPLING = 10  # number of imputation sample per data sample.
-   logL, U = pygmmis.fit(gmm, data, init_callback=pygmmis.initFromDataMinMax, sel_callback=cb, covar_callback=covar_cb, w=w, cutoff=cutoff, background=bg, tol=tol, rng=rng)
+   pygmmis.VERBOSITY = 1      # 0,1,2
+   pygmmis.OVERSAMPLING = 10  # number of imputation samples per data sample
+
+   # define RNG for deterministic behavior
+   from numpy.random import RandomState
+   seed = 42
+   rng = RandomState(seed)
+
+   # run EM
+   logL, U = pygmmis.fit(gmm, data, init_callback=pygmmis.initFromDataMinMax,\
+                         sel_callback=cb, covar_callback=covar_cb, w=w, cutoff=cutoff,\
+                         background=bg, tol=tol, rng=rng)
    ```
 
    This runs the EM procedure until tolerance is reached and returns the final mean log-likelihood of all samples, and the neighborhood of each component (indices of data samples that are within cutoff of a GMM component).
@@ -106,10 +115,20 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
 
    ```python
    p = gmm(test_coords, as_log=False)
-   N = 1000
-   samples = gmm.draw(N, rng=rng)
+   N_s = 1000
+   samples = gmm.draw(N_s)
+
+   # sample from the model with noise, background, and selection:
+   # if you want to get the missing sample, set invert_sel=True.
+   # N_orig is the estimated number of samples prior to selection
+   obs_size = len(data)
+   samples, covar_samples, N_orig = pygmmis.draw(gmm, obs_size, sel_callback=cb,\
+                                                 orig_size=None,\
+                                                 covar_callback=covar_cb,\
+                                                 background=bg, invert_sel=False,\
+                                                 rng=np.random)
    ```
 
 
 
-For the complete example, have a look at [the test script](tests/test.py). For requests and bug reports, please open an issue.
+For a complete example, have a look at [the test script](tests/test.py). For requests and bug reports, please open an issue.

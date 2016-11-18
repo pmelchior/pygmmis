@@ -672,6 +672,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     pool.close()
     return log_L, U
 
+# run EM sequence
 def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
@@ -753,18 +754,20 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 
     return log_L, N, N2
 
-
+# run one EM step
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
 
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
     A2 = M2 = C2 = B2 = H2 = N2 = 0
+
+    # here the magic happens: imputation from the current model
     if sel_callback is not None:
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        data2, covar2, N0 = _I(gmm, sel_callback, len(data)*OVERSAMPLING, orig_size=N0*OVERSAMPLING, covar_callback=covar_callback, background=background, rng=rng)
+        data2, covar2, N0 = draw(gmm, len(data)*OVERSAMPLING, sel_callback=sel_callback, orig_size=N0*OVERSAMPLING, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
         U2 = [None for k in xrange(gmm.K)]
         N0 = int(N0/OVERSAMPLING)
 
@@ -793,7 +796,8 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=N
 
     return log_L, N, N2, N0
 
-
+# perform E step calculations.
+# If cutoff is set, this will also set the neighborhoods U
 def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
     import parmap
     if background is None:
@@ -853,7 +857,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, background=None, po
 
     return log_L
 
-
+# compute chi^2, and apply selections on component neighborhood based in chi^2
 def _Esum(k, U_k, gmm, data, covar=None, cutoff=None):
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
@@ -892,7 +896,7 @@ def _Esum(k, U_k, gmm, data, covar=None, cutoff=None):
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
-
+# get zeroth, first, second moments of the data weighted with p_k(x) avgd over x
 def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, background=None, pool=None, chunksize=1):
 
     # save the M sums from observed data
@@ -918,7 +922,8 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
 
     return A,M,C,N,B
 
-
+# update component with the moment matrices.
+# If altered is set, update only those components and renormalize the amplitudes
 def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=None, background=None):
     # M-step for all components using data (and data2, if non-zero sums are set)
 
@@ -958,7 +963,7 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=None, back
         else:
             background.amp = min((B + B2) / (H.size + H2.size), background.amp_max)
 
-
+# compute moments for the Mstep
 def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
     if log_p_k.size:
         # get log_q_ik by dividing with S = sum_k p_ik
@@ -1002,7 +1007,7 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, log_S):
     else:
         return 0,0,0
 
-
+# draw from the model (+ background) and apply appropriate covariances
 def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
     # draw sample from model, or from background+model
     if background is None:
@@ -1035,7 +1040,40 @@ def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
     return data2, covar2
 
 
-def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, background=None, invert_sel=True, rng=np.random):
+def draw(gmm, obs_size, sel_callback=None, invert_sel=False, orig_size=None, covar_callback=None, background=None, rng=np.random):
+    """Draw from the GMM (and the Background) with noise and selection.
+
+    Draws orig_size samples from the GMM and the Background, if set; calls
+    covar_callback if set and applies resulting covariances; the calls
+    sel_callback on the (noisy) samples and returns those matching ones.
+
+    If the number is resulting samples is inconsistent with obs_size, i.e.
+    outside of the 68 percent confidence limit of a Poisson draw, it will
+    update its estimate for the original sample size orig_size.
+    An estimate can be provided with orig_size, otherwise it will use obs_size.
+
+    Note:
+        If sel_callback is set, the number of returned samples is not
+        necessarily given by obs_size.
+
+    Args:
+        gmm: an instance if GMM
+        obs_size (int): number of observed samples
+        sel_callback: completeness callback to generate imputation samples.
+        invert_sel (bool): whether to invert the result of sel_callback
+        orig_size (int): an estimate of the original size of the sample.
+        background: an instance of Background
+        covar_callback: covariance callback for imputation samples.
+        rng: numpy.random.RandomState for deterministic behavior
+
+    Returns:
+        sample: nunmpy array (N_orig, D)
+        covar_sample: numpy array (N_orig, D, D) or None of covar_callback=None
+        N_orig (int): updated estimate of orig_size if sel_callback is set
+
+    Throws:
+        RuntimeError for inconsistent argument combinations
+    """
 
     if orig_size is None:
         orig_size = int(obs_size)
@@ -1046,26 +1084,27 @@ def _I(gmm, sel_callback, obs_size, orig_size=None, covar_callback=None, backgro
     data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
 
     # apply selection
-    sel2 = sel_callback(data2)
-
-    # check if predicted observed size is consistent with observed data
-    # 68% confidence interval for Poisson variate: observed size
-    from scipy.stats import chi2
-    alpha = 0.32
-    lower = 0.5*chi2.ppf(alpha/2, 2*obs_size)
-    upper = 0.5*chi2.ppf(1 - alpha/2, 2*obs_size + 2)
-    obs_size_ = sel2.sum()
-    while obs_size_ > upper or obs_size_ < lower:
-        orig_size = int(orig_size / obs_size_ * obs_size)
-        data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
+    if sel_callback is not None:
         sel2 = sel_callback(data2)
-        obs_size_ = sel2.sum()
 
-    if invert_sel:
-        sel2 = ~sel2
-    data2 = data2[sel2]
-    if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
-        covar2 = covar2[sel2]
+        # check if predicted observed size is consistent with observed data
+        # 68% confidence interval for Poisson variate: observed size
+        from scipy.stats import chi2
+        alpha = 0.32
+        lower = 0.5*chi2.ppf(alpha/2, 2*obs_size)
+        upper = 0.5*chi2.ppf(1 - alpha/2, 2*obs_size + 2)
+        obs_size_ = sel2.sum()
+        while obs_size_ > upper or obs_size_ < lower:
+            orig_size = int(orig_size / obs_size_ * obs_size)
+            data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
+            sel2 = sel_callback(data2)
+            obs_size_ = sel2.sum()
+
+        if invert_sel:
+            sel2 = ~sel2
+        data2 = data2[sel2]
+        if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
+            covar2 = covar2[sel2]
 
     return data2, covar2, orig_size
 
