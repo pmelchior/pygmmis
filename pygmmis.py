@@ -399,10 +399,32 @@ class Background(object):
 # Begin of fit functions
 ############################
 
+#: Verbosity level: [0,1,2]
 VERBOSITY = False
+#: Oversampling used for imputation sample, as large as feasible
 OVERSAMPLING = 4
 
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
+    """Initialization callback for uniform random component means.
+
+    Component amplitudes are set at 1/gmm.K, covariances are set to
+    s**2*np.eye(D), and means are distributed randomly over the range that is
+    covered by data.
+
+    If s is not given, it will be set such that the volume of all components
+    completely fills the space covered by data.
+
+    Args:
+        gmm: A GMM to be initialized
+        data: numpy array (N,D) to define the range of the component means
+        covar: ignored in this callback
+        s (float): if set, sets component variances
+        k (iterable): list of components to set, is None sets all components
+        rng: numpy.random.RandomState for deterministic behavior
+
+    Returns:
+        None
+    """
     if k is None:
         k = slice(None)
     gmm.amp[k] = 1/gmm.K
@@ -423,6 +445,26 @@ def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
+    """Initialization callback for component means to follow data on scales > s.
+
+    Component amplitudes are set to 1/gmm.K, covariances are set to
+    s**2*np.eye(D). For each mean, a data sample is selected at random, and a
+    multivariant Gaussian offset is added, whose variance is given by s**2.
+
+    If s is not given, it will be set such that the volume of all components
+    completely fills the space covered by data.
+
+    Args:
+        gmm: A GMM to be initialized
+        data: numpy array (N,D) to define the range of the component means
+        covar: ignored in this callback
+        s (float): if set, sets component variances
+        k (iterable): list of components to set, is None sets all components
+        rng: numpy.random.RandomState for deterministic behavior
+
+    Returns:
+        None
+    """
     if k is None:
         k = slice(None)
         k_len = gmm.K
@@ -448,6 +490,23 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
 
 # Run a simple GMM to initialize a tricky one:
 def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, background=None, tol=1e-3, covar_factor=1.):
+    """Initialization callback to daisy-chain GMM fits.
+
+    Component amplitudes are first initialized with init_callback, then fit()
+    is run with the parameters (w, cutoff, background, tol) as specified.
+    Once done, the covariances are multiplied with covar_factor.
+
+    Args:
+        gmm: A GMM to be initialized
+        data: numpy array (N,D) to define the range of the component means
+        covar: data covariance, passed on to fit()
+        s (float): if set, sets component variances
+        k (iterable): list of components to set, is None sets all components
+        rng: numpy.random.RandomState for deterministic behavior
+        init_callback: initialization callback for first fit() run
+    Returns:
+        None
+    """
     # 1) run GMM without error and selection (fit is essentially an init fct)
     fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, background=background, tol=tol, rng=rng)
     # 2) adjust the covariance to allow to provide more support
@@ -464,10 +523,22 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
             k_ -= set([k])
         init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
 
-# initialize from k-means clusters
-# use Algorithm 1 from Bloemer & Bujna (arXiv:1312.5946)
-# NOTE: results not deterministic
 def initFromKMeans(gmm, data, covar=None, rng=np.random):
+    """Initialization callback from a k-means clustering run.
+
+    See Algorithm 1 from Bloemer & Bujna (arXiv:1312.5946)
+    NOTE: The result of this call are not deterministic even if rng is set
+    because scipy.cluster.vq.kmeans2 uses its own initialization.
+
+    Args:
+        gmm: A GMM to be initialized
+        data: numpy array (N,D) to define the range of the component means
+        covar: ignored in this callback
+        rng: numpy.random.RandomState for deterministic behavior
+
+    Returns:
+        None
+    """
     from scipy.cluster.vq import kmeans2
     center, label = kmeans2(data, gmm.K)
     for k in xrange(gmm.K):
