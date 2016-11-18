@@ -346,7 +346,26 @@ class GMM(object):
         return np.log(self.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2
 
 class Background(object):
+    """Background object to be used in conjuction with GMM.
+
+    For a normalizable uniform distribution, a support footprint must be set.
+    It should be sufficiently large to explain all non-clusters samples.
+
+    Attributes:
+        amp (float): mixing amplitude
+        footprint: numpy array, (D,2) of rectangular volume
+        adjust_amp (bool): whether amp will be adjusted as part of the fit
+        amp_max (float): maximum value of amp allowed if adjust_amp=True
+    """
     def __init__(self, footprint):
+        """Initialize Background with a footprint.
+
+        Args:
+            footprint: numpy array, (D,2) of rectangular volume
+
+        Returns:
+            None
+        """
         self.amp = 0
         self.footprint = footprint
         self.adjust_amp = True
@@ -354,10 +373,24 @@ class Background(object):
 
     @property
     def p(self):
+        """Probability of the background model.
+
+        Returns:
+            float, equal to 1/volume, where volume is given by footprint.
+        """
         volume = np.prod(self.footprint[1] - self.footprint[0])
         return 1/volume
 
     def draw(self, size=1, rng=np.random):
+        """Draw samples from uniform background.
+
+        Args:
+            size (int): number of samples to draw
+            rng: numpy.random.RandomState for deterministic draw
+
+        Returns:
+            numpy array (size, D)
+        """
         dx = self.footprint[1] - self.footprint[0]
         return self.footprint[0] + dx*rng.rand(size,len(self.footprint[0]))
 
