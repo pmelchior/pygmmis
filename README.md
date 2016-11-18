@@ -13,11 +13,11 @@ It can also incorporate an uniform "background" distribution as well as independ
 
 ![Example of pyGMMis](tests/pygmmis.png)
 
-In the example above, the true distribution is shown as contours in the left panel. We then draw 400 samples from it (red), add Gaussian noise to them (1,2,3 sigma contours shown in blue), and select only samples within the box but outside of the circle (dashed).
+In the example above, the true distribution is shown as contours in the left panel. We then draw 400 samples from it (red), add Gaussian noise to them (1,2,3 sigma contours shown in blue), and select only samples within the box but outside of the circle (blue).
 
 The code is written in pure python (developed and tested in 2.7), parallelized with `multiprocessing`, can automatically segment the data into localized neighborhoods, and is capable of performing density estimation with millions of samples and thousands of model components on machines with sufficient memory.
 
-More details in the paper of [Melchior & Goulding (2016)](). Please cite this paper if you make use of this code.
+More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/abs/1611.05806). Please cite the paper if you make use of this code.
 
 ## Prerequisites
 
