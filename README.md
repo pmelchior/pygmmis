@@ -114,19 +114,19 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
 8. Evaluate the model:
 
    ```python
+   # log of p(x)
    p = gmm(test_coords, as_log=False)
    N_s = 1000
+   # draw samples from GMM
    samples = gmm.draw(N_s)
 
-   # sample from the model with noise, background, and selection:
+   # draw sample from the model with noise, background, and selection:
    # if you want to get the missing sample, set invert_sel=True.
    # N_orig is the estimated number of samples prior to selection
    obs_size = len(data)
    samples, covar_samples, N_orig = pygmmis.draw(gmm, obs_size, sel_callback=cb,\
-                                                 orig_size=None,\
-                                                 covar_callback=covar_cb,\
-                                                 background=bg, invert_sel=False,\
-                                                 rng=np.random)
+                                                 invert_sel=False, orig_size=None,\
+                                                 covar_callback=covar_cb,background=bg)
    ```
 
 
