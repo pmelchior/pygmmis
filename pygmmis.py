@@ -590,7 +590,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     if init_callback is not None:
         init_callback(gmm, data=data, covar=covar, rng=rng)
     elif VERBOSITY:
-        print "forgoing initialization: hopefully GMM was initialized..."
+        print("forgoing initialization: hopefully GMM was initialized...")
 
     # test if callbacks are consistent
     if covar is not None and sel_callback is not None and covar_callback is None:
@@ -598,7 +598,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
 
     # cutoff cannot be used with background due to competing definitions of neighborhood
     if background is not None and cutoff is not None:
-        print "adjusting cutoff = None for background model fit"
+        print("adjusting cutoff = None for background model fit")
         cutoff = None
 
     # set up pool
@@ -749,7 +749,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
         it += 1
 
     if VERBOSITY:
-        print ""
+        print ("")
 
     return log_L, N, N2
 
@@ -1097,7 +1097,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     if merge_jk[0] == 0 and merge_jk[1] == 0:
         global VERBOSITY
         if VERBOSITY >= 2:
-            print "neighborhoods disjunct. merging components %d and %d" % tuple(merge_jk)
+            print ("neighborhoods disjunct. merging components %d and %d" % tuple(merge_jk))
         merge_jk = np.argsort(gmm.amp)[:2]
         cleanup = True
 
@@ -1172,7 +1172,7 @@ def cv_fit(gmm, data, L=10, **kwargs):
     lcv = np.empty(N)
 
     if VERBOSITY:
-        print "running %d-fold cross-validation ..." % L
+        print ("running %d-fold cross-validation ..." % L)
 
     # CV and stacking can't have probabilistic inits that depends on
     # data or subsets thereof
@@ -1250,8 +1250,8 @@ def stack_fit(gmms, data, kwargs, L=10, tol=1e-5, rng=np.random):
     log_S = np.empty(N)
     it = 0
     if VERBOSITY:
-        print "optimizing stacking weights\n"
-        print "ITER\tLOG_L"
+        print ("optimizing stacking weights\n")
+        print ("ITER\tLOG_L")
     while True and it < 20:
         log_p_k[:,:] = lcvs + np.log(beta)[:,None]
         log_S[:] = logsum(log_p_k)
@@ -1259,12 +1259,12 @@ def stack_fit(gmms, data, kwargs, L=10, tol=1e-5, rng=np.random):
         beta[:] = np.exp(logsum(log_p_k, axis=1)) / N
         logL_ = log_S.mean()
         if VERBOSITY:
-            print "STACK%d\t%.4f" % (it, logL_)
+            print ("STACK%d\t%.4f" % (it, logL_))
 
         if it > 0 and logL_ - logL < tol:
             break
         logL = logL_
         it += 1
     if VERBOSITY:
-        print ""
+        print ("")
     return stack(gmms, beta)
