@@ -403,6 +403,8 @@ class Background(object):
 VERBOSITY = False
 #: Oversampling used for imputation sample, as large as feasible
 OVERSAMPLING = 4
+#: Maximal iteration counter: [int, None]
+MAXITER = None
 
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     """Initialization callback for uniform random component means.
@@ -690,7 +692,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
         shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.25)
 
     it = 0
-    maxiter = max(100, gmm.K)
     if VERBOSITY:
         global VERB_BUFFER
         print("\nITER\tPOINTS\tIMPUTED\tORIG\tLOG_L\tSTABLE")
@@ -703,7 +704,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
     N0 = len(data) # size of original (unobscured) data set (signal and background)
     N2 = 0         # size of imputed signal sample
 
-    while it < maxiter: # limit loop in case of slow convergence
+    while it < MAXITER or MAXITER is None: # limit loop in case of slow convergence
 
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
 
