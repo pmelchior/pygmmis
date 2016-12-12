@@ -1034,6 +1034,7 @@ def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
             # faster than drawing one sample per each covariance
             noise = rng.multivariate_normal(np.zeros(gmm.D), np.eye(gmm.D), size=len(data2))
             val, rot = np.linalg.eigh(covar2)
+            val = np.maximum(val,0) # to prevent univariate errors to underflow
             noise = np.einsum('...ij,...j', rot, np.sqrt(val)*noise)
         data2 += noise
     else:
