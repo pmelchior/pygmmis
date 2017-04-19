@@ -523,7 +523,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
             k_ -= set(k)
         except TypeError:
             k_ -= set([k])
-        init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
+        init_callback(gmm, k=list(k_), data=data, covar=covar, rng=rng)
 
 def initFromKMeans(gmm, data, covar=None, rng=np.random):
     """Initialization callback from a k-means clustering run.
