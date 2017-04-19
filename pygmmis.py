@@ -523,7 +523,7 @@ def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init
             k_ -= set(k)
         except TypeError:
             k_ -= set([k])
-        init_callback(gmm, k=k_, data=data, covar=covar, rng=rng)
+        init_callback(gmm, k=list(k_), data=data, covar=covar, rng=rng)
 
 def initFromKMeans(gmm, data, covar=None, rng=np.random):
     """Initialization callback from a k-means clustering run.
@@ -591,15 +591,6 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     # init components
     if init_callback is not None:
         init_callback(gmm, data=data, covar=covar, rng=rng)
-        # with selection: make sure the components are in the observed partion
-        if sel_callback is not None:
-            inside = sel_callback(gmm.mean)
-            while inside.sum() != gmm.K:
-                try:
-                    init_callback(gmm, data=data, covar=covar, rng=rng, k=np.flatnonzero(~inside))
-                except TypeError: # init doesn't have argument k
-                    init_callback(gmm, data=data, covar=covar, rng=rng)
-                inside = sel_callback(gmm.mean)
 
     elif VERBOSITY:
         print("forgoing initialization: hopefully GMM was initialized...")
