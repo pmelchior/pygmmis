@@ -326,7 +326,7 @@ if __name__ == '__main__':
     for r in xrange(R):
         if bg is not None:
             bg.amp = bg_amp
-        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataMinMax, w=w, cutoff=cutoff, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print "execution time %ds" % (datetime.datetime.now() - start).seconds
     plotResults(orig, data, avg, patch=ps, description="standard\ EM")
