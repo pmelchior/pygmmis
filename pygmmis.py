@@ -562,9 +562,6 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     OVERSAMPLING defines the number if imputation samples per data sample.
         Value of 1 is fine but may become instable. Set as high as feasible.
 
-    Note:
-        If background is set, it implies cutoff=None.
-
     Args:
         gmm: an instance if GMM
         data: numpy array (N,D)
@@ -577,9 +574,17 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
         init_callback: callback to initialize the components
         background: an instance of Background if simultaneous fitting is desired
         tol (float): tolerance for covergence of mean log-likelihood
-        frozen (iterable): index list of components that are not updated
+        frozen (iterable or dict): index list of components that are not updated
         split_n_merge (int): number of split & merge attempts
         rng: numpy.random.RandomState for deterministic behavior
+
+    Notes:
+        If background is set, it implies cutoff=None.
+
+        If frozen is a simple list, it will be assumed that is applies to mean
+        and covariance of the specified components. It can also be a dictionary
+        with the keys "mean" and "covar" to specify them separately. In either
+        case, amplitudes will be updated to reflect any changes made.
 
     Returns:
         mean log-likelihood (float), component neighborhoods (list of ints)
@@ -623,10 +628,16 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     if VERBOSITY:
         global VERB_BUFFER
 
-    if frozen is None:
-        changeable = None
-    else:
-        changeable = np.flatnonzero(np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True))
+    changeable = {"amp": slice(None), "mean": slice(None), "covar": slice(None)}
+    if frozen is not None:
+        if hasattr(frozen, 'keys'):
+            changeable['mean'] = np.in1d(xrange(gmm.K), frozen['mean'], assume_unique=True, invert=True)
+            changeable['covar'] = np.in1d(xrange(gmm.K), frozen['covar'], assume_unique=True, invert=True)
+            # amp needs to change if anything else changes
+            changeable['amp'] = changeable['mean'] | changeable['covar']
+        else:
+            changeable['mean'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
+            changeable['covar'] = changeable['amp'] = changeable['mean']
 
     log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
 
@@ -939,24 +950,21 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
 # update component with the moment matrices.
 # If changeable is set, update only those components and renormalize the amplitudes
 def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, background=None):
-    # M-step for all components using data (and data2, if non-zero sums are set)
 
-    # partial EM: normal update for mean and covar, but constrained for amp
-    if changeable is None:
-        changed = slice(None)
-    else:
-        changed = changeable
-
-    if changeable is None:
-        gmm.amp[changed] = (A + A2)[changed] / (N + N2)
+    # amp update:
+    # for partial update: need to update amp for any component that is changeable
+    if not hasattr(changeable['amp'], '__iter__'): # it's a slice(None), not a bool array
+        gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (N + N2)
     else:
         # Bovy eq. 31
-        unchangeable = np.in1d(xrange(gmm.K), changeable, assume_unique=True, invert=True)
-        gmm.amp[changeable] = (A + A2)[changeable] / (A + A2)[changeable].sum() * (1 - (gmm.amp[unchangeable]).sum())
+        gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (A + A2)[changeable['amp']].sum() * (1 - (gmm.amp[~changeable['amp']]).sum())
     # because of finite precision during the imputation: renormalize
     gmm.amp /= gmm.amp.sum()
 
-    gmm.mean[changed,:] = (M + M2)[changed,:]/(A + A2)[changed,None]
+    # mean updateL
+    gmm.mean[changeable['mean'],:] = (M + M2)[changeable['mean'],:]/(A + A2)[changeable['mean'],None]
+
+    # covar updateL
     # minimum covariance term?
     if w > 0:
         # we assume w to be a lower bound of the isotropic dispersion,
@@ -965,9 +973,9 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
         # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
         # On average, q_j = N/K, so we'll adopt that to correct.
         w_eff = w**2 * ((N+N2)/gmm.K + 1)
-        gmm.covar[changed,:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changed,:,:] / (A + A2 + 1)[changed,None,None]
+        gmm.covar[changeable['covar'],:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changeable['covar'],:,:] / (A + A2 + 1)[changeable['covar'],None,None]
     else:
-        gmm.covar[changed,:,:] = (C + C2)[changed,:,:] / (A + A2)[changed,None,None]
+        gmm.covar[changeable['covar'],:,:] = (C + C2)[changeable['covar'],:,:] / (A + A2)[changeable['covar'],None,None]
 
     # recompute background amplitude;
     # since B is computed over all samples, not just signal portion, need H.size
