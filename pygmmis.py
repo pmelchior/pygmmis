@@ -632,50 +632,57 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
-    gmm_ = GMM(gmm.K, gmm.D)
-    while split_n_merge and gmm.K >= 3:
+    gmm_ = None
+    if frozen is not None and split_n_merge:
+        print("forgoing split'n'merge because some components are frozen")
 
-        gmm_.amp[:] = gmm.amp[:]
-        gmm_.mean[:] = gmm.mean[:,:]
-        gmm_.covar[:,:,:] = gmm.covar[:,:,:]
-        U_ = [U[k].copy() for k in xrange(gmm.K)]
+    else:
+        while split_n_merge and gmm.K >= 3:
 
-        changeable, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+            if gmm_ is None:
+                gmm_ = GMM(gmm.K, gmm.D)
 
-        if VERBOSITY:
-            print ("merging %d and %d, splitting %d" % tuple(changeable))
+            gmm_.amp[:] = gmm.amp[:]
+            gmm_.mean[:] = gmm.mean[:,:]
+            gmm_.covar[:,:,:] = gmm.covar[:,:,:]
+            U_ = [U[k].copy() for k in xrange(gmm.K)]
 
-        # modify components
-        _update_snm(gmm, changeable, U, N+N2, cleanup)
+            changeable, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
 
-        # run partial EM on changeable components
-        # NOTE: for a partial run, we'd only need the change to Log_S from the
-        # changeable components. However, the neighborhoods can change from _update_snm
-        # or because they move, so that operation is ill-defined.
-        # Thus, we'll always run a full E-step, which is pretty cheap for
-        # converged neighborhood.
-        # The M-step could in principle be run on the changeable components only,
-        # but there seem to be side effects in what I've tried.
-        # Similar to the E-step, the imputation step needs to be run on all
-        # components, otherwise the contribution of the changeable ones to the mixture
-        # would be over-estimated.
-        # Effectively, partial runs are as expensive as full runs.
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
-
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=None, rng=rng)
-
-        if log_L >= log_L_:
-            # revert to backup
-            gmm.amp[:] = gmm_.amp[:]
-            gmm.mean[:] = gmm_.mean[:,:]
-            gmm.covar[:,:,:] = gmm_.covar[:,:,:]
-            U = U_
             if VERBOSITY:
-                print ("split'n'merge likelihood decreased: reverting to previous model")
-            break
+                print ("merging %d and %d, splitting %d" % tuple(changeable))
 
-        log_L = log_L_
-        split_n_merge -= 1
+            # modify components
+            _update_snm(gmm, changeable, U, N+N2, cleanup)
+
+            # run partial EM on changeable components
+            # NOTE: for a partial run, we'd only need the change to Log_S from the
+            # changeable components. However, the neighborhoods can change from _update_snm
+            # or because they move, so that operation is ill-defined.
+            # Thus, we'll always run a full E-step, which is pretty cheap for
+            # converged neighborhood.
+            # The M-step could in principle be run on the changeable components only,
+            # but there seem to be side effects in what I've tried.
+            # Similar to the E-step, the imputation step needs to be run on all
+            # components, otherwise the contribution of the changeable ones to the mixture
+            # would be over-estimated.
+            # Effectively, partial runs are as expensive as full runs.
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
+
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=None, rng=rng)
+
+            if log_L >= log_L_:
+                # revert to backup
+                gmm.amp[:] = gmm_.amp[:]
+                gmm.mean[:] = gmm_.mean[:,:]
+                gmm.covar[:,:,:] = gmm_.covar[:,:,:]
+                U = U_
+                if VERBOSITY:
+                    print ("split'n'merge likelihood decreased: reverting to previous model")
+                break
+
+            log_L = log_L_
+            split_n_merge -= 1
 
     pool.close()
     return log_L, U
