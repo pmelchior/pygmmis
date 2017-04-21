@@ -658,13 +658,13 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
             gmm_.covar[:,:,:] = gmm.covar[:,:,:]
             U_ = [U[k].copy() for k in xrange(gmm.K)]
 
-            changeable, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+            changing, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
 
             if VERBOSITY:
-                print ("merging %d and %d, splitting %d" % tuple(changeable))
+                print ("merging %d and %d, splitting %d" % tuple(changing))
 
             # modify components
-            _update_snm(gmm, changeable, U, N+N2, cleanup)
+            _update_snm(gmm, changing, U, N+N2, cleanup)
 
             # run partial EM on changeable components
             # NOTE: for a partial run, we'd only need the change to Log_S from the
@@ -678,9 +678,12 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
             # components, otherwise the contribution of the changeable ones to the mixture
             # would be over-estimated.
             # Effectively, partial runs are as expensive as full runs.
+
+            changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
             log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
 
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=None, rng=rng)
+            changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
 
             if log_L >= log_L_:
                 # revert to backup
@@ -1185,13 +1188,13 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     split_l3 = np.argsort(JS)[-3:][::-1]
 
     # check that the three indices are unique
-    changeable = np.array([merge_jk[0], merge_jk[1], split_l3[0]])
+    changing = np.array([merge_jk[0], merge_jk[1], split_l3[0]])
     if split_l3[0] in merge_jk:
         if split_l3[1] not in merge_jk:
-            changeable[2] = split_l3[1]
+            changing[2] = split_l3[1]
         else:
-            changeable[2] = split_l3[2]
-    return changeable, cleanup
+            changing[2] = split_l3[2]
+    return changing, cleanup
 
 
 def _update_snm(gmm, changeable, U, N, cleanup):
