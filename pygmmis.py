@@ -490,7 +490,6 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
-# Run a simple GMM to initialize a tricky one:
 def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, background=None, tol=1e-3, covar_factor=1.):
     """Initialization callback to daisy-chain GMM fits.
 
@@ -553,7 +552,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callback=None, init_callback=None, background=None, tol=1e-3, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callback=None, init_callback=None, background=None, tol=1e-3, frozen=None, split_n_merge=False, rng=np.random):
     """Fit GMM to data.
 
     If given, init_callback is called to set up the GMM components. Then, the
@@ -578,6 +577,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
         init_callback: callback to initialize the components
         background: an instance of Background if simultaneous fitting is desired
         tol (float): tolerance for covergence of mean log-likelihood
+        frozen (iterable): index list of components that are not updated
         split_n_merge (int): number of split & merge attempts
         rng: numpy.random.RandomState for deterministic behavior
 
@@ -623,7 +623,12 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     if VERBOSITY:
         global VERB_BUFFER
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, rng=rng)
+    if frozen is None:
+        altered = None
+    else:
+        altered = np.flatnonzero(np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True))
+
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, altered=altered, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy

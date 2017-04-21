@@ -328,8 +328,8 @@ if __name__ == '__main__':
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
-    print "execution time %ds" % (datetime.datetime.now() - start).seconds
-    plotResults(orig, data, avg, patch=ps, description="standard\ EM")
+    print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
+    plotResults(orig, data, avg, patch=ps, description="standard\ EM,\ ignoring\ errors")
 
     # 2) pygmmis with imputation, igoring errors
     # We need a better init function to allow the model to
@@ -345,7 +345,7 @@ if __name__ == '__main__':
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
-    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="\mathtt{GMMis},\ ignoring\ errors")
 
     # 3) pygmmis with imputation, incorporating errors
@@ -356,7 +356,7 @@ if __name__ == '__main__':
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
-    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="\mathtt{GMMis}")
     #plotDifferences(orig, data, gmms, avg, l, patch=ps)
     #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
@@ -369,6 +369,6 @@ if __name__ == '__main__':
         init_cb(gmms[r], data=data, covar=covar, rng=rng)
     kwargs = [dict(covar=covar, init_callback=None, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng) for i in xrange(R)]
     stacked = pygmmis.stack_fit(gmms, data, kwargs, L=10, rng=rng)
-    print "execution time %ds" % (datetime.datetime.now() - start).seconds
+    print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, stacked, patch=ps, description="Stacked")
     """
