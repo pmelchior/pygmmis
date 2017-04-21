@@ -624,11 +624,11 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
         global VERB_BUFFER
 
     if frozen is None:
-        altered = None
+        changeable = None
     else:
-        altered = np.flatnonzero(np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True))
+        changeable = np.flatnonzero(np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True))
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, altered=altered, tol=tol, rng=rng)
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
@@ -640,29 +640,29 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
         gmm_.covar[:,:,:] = gmm.covar[:,:,:]
         U_ = [U[k].copy() for k in xrange(gmm.K)]
 
-        altered, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+        changeable, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
 
         if VERBOSITY:
-            print ("merging %d and %d, splitting %d" % tuple(altered))
+            print ("merging %d and %d, splitting %d" % tuple(changeable))
 
         # modify components
-        _update_snm(gmm, altered, U, N+N2, cleanup)
+        _update_snm(gmm, changeable, U, N+N2, cleanup)
 
-        # run partial EM on altered components
+        # run partial EM on changeable components
         # NOTE: for a partial run, we'd only need the change to Log_S from the
-        # altered components. However, the neighborhoods can change from _update_snm
+        # changeable components. However, the neighborhoods can change from _update_snm
         # or because they move, so that operation is ill-defined.
         # Thus, we'll always run a full E-step, which is pretty cheap for
         # converged neighborhood.
-        # The M-step could in principle be run on the altered components only,
+        # The M-step could in principle be run on the changeable components only,
         # but there seem to be side effects in what I've tried.
         # Similar to the E-step, the imputation step needs to be run on all
-        # components, otherwise the contribution of the altered ones to the mixture
+        # components, otherwise the contribution of the changeable ones to the mixture
         # would be over-estimated.
         # Effectively, partial runs are as expensive as full runs.
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", altered=altered, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
 
-        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", altered=None, rng=rng)
+        log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=None, rng=rng)
 
         if log_L >= log_L_:
             # revert to backup
@@ -681,7 +681,7 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
     return log_L, U
 
 # run EM sequence
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", altered=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -712,7 +712,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 
     while it < MAXITER or MAXITER is None: # limit loop in case of slow convergence
 
-        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, altered=altered, it=it, rng=rng)
+        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -762,7 +762,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
     return log_L, N, N2
 
 # run one EM step
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, altered=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
 
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
@@ -799,7 +799,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=N
             if VERBOSITY >= 2 and sel_outside.any():
                 print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
-    _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=altered, background=background)
+    _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
 
     return log_L, N, N2, N0
 
@@ -914,7 +914,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
     B = 0
 
     # perform sums for M step in the pool
-    # NOTE: in a partial run, could work on altered components only;
+    # NOTE: in a partial run, could work on changeable components only;
     # however, there seem to be side effects or race conditions
     import parmap
     k = 0
@@ -930,22 +930,22 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, cutoff=None, backgr
     return A,M,C,N,B
 
 # update component with the moment matrices.
-# If altered is set, update only those components and renormalize the amplitudes
-def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, altered=None, background=None):
+# If changeable is set, update only those components and renormalize the amplitudes
+def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, background=None):
     # M-step for all components using data (and data2, if non-zero sums are set)
 
     # partial EM: normal update for mean and covar, but constrained for amp
-    if altered is None:
+    if changeable is None:
         changed = slice(None)
     else:
-        changed = altered
+        changed = changeable
 
-    if altered is None:
+    if changeable is None:
         gmm.amp[changed] = (A + A2)[changed] / (N + N2)
     else:
         # Bovy eq. 31
-        unaltered = np.in1d(xrange(gmm.K), altered, assume_unique=True, invert=True)
-        gmm.amp[altered] = (A + A2)[altered] / (A + A2)[altered].sum() * (1 - (gmm.amp[unaltered]).sum())
+        unchangeable = np.in1d(xrange(gmm.K), changeable, assume_unique=True, invert=True)
+        gmm.amp[changeable] = (A + A2)[changeable] / (A + A2)[changeable].sum() * (1 - (gmm.amp[unchangeable]).sum())
     # because of finite precision during the imputation: renormalize
     gmm.amp /= gmm.amp.sum()
 
@@ -1170,44 +1170,44 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     split_l3 = np.argsort(JS)[-3:][::-1]
 
     # check that the three indices are unique
-    altered = np.array([merge_jk[0], merge_jk[1], split_l3[0]])
+    changeable = np.array([merge_jk[0], merge_jk[1], split_l3[0]])
     if split_l3[0] in merge_jk:
         if split_l3[1] not in merge_jk:
-            altered[2] = split_l3[1]
+            changeable[2] = split_l3[1]
         else:
-            altered[2] = split_l3[2]
-    return altered, cleanup
+            changeable[2] = split_l3[2]
+    return changeable, cleanup
 
 
-def _update_snm(gmm, altered, U, N, cleanup):
+def _update_snm(gmm, changeable, U, N, cleanup):
     # reconstruct A from gmm.amp
     A = gmm.amp * N
 
     # update parameters and U
     # merge 0 and 1, store in 0, Bovy eq. 39
-    gmm.amp[altered[0]] = gmm.amp[altered[0:2]].sum()
+    gmm.amp[changeable[0]] = gmm.amp[changeable[0:2]].sum()
     if not cleanup:
-        gmm.mean[altered[0]] = np.sum(gmm.mean[altered[0:2]] * A[altered[0:2]][:,None], axis=0) / A[altered[0:2]].sum()
-        gmm.covar[altered[0]] = np.sum(gmm.covar[altered[0:2]] * A[altered[0:2]][:,None,None], axis=0) / A[altered[0:2]].sum()
-        U[altered[0]] = np.union1d(U[altered[0]], U[altered[1]])
+        gmm.mean[changeable[0]] = np.sum(gmm.mean[changeable[0:2]] * A[changeable[0:2]][:,None], axis=0) / A[changeable[0:2]].sum()
+        gmm.covar[changeable[0]] = np.sum(gmm.covar[changeable[0:2]] * A[changeable[0:2]][:,None,None], axis=0) / A[changeable[0:2]].sum()
+        U[changeable[0]] = np.union1d(U[changeable[0]], U[changeable[1]])
     else:
         # if we're cleaning up the weakest components:
         # merging does not lead to valid component parameters as the original
         # ones can be anywhere. Simply adopt second one.
-        gmm.mean[altered[0],:] = gmm.mean[altered[1],:]
-        gmm.covar[altered[0],:,:] = gmm.covar[altered[1],:,:]
-        U[altered[0]] = U[altered[1]]
+        gmm.mean[changeable[0],:] = gmm.mean[changeable[1],:]
+        gmm.covar[changeable[0],:,:] = gmm.covar[changeable[1],:,:]
+        U[changeable[0]] = U[changeable[1]]
 
     # split 2, store in 1 and 2
     # following SVD method in Zhang 2003, with alpha=1/2, u = 1/4
-    gmm.amp[altered[1]] = gmm.amp[altered[2]] = gmm.amp[altered[2]] / 2
+    gmm.amp[changeable[1]] = gmm.amp[changeable[2]] = gmm.amp[changeable[2]] / 2
     # TODO: replace with linalg.eigvalsh, but eigenvalues are not always ordered
-    _, radius2, rotation = np.linalg.svd(gmm.covar[altered[2]])
+    _, radius2, rotation = np.linalg.svd(gmm.covar[changeable[2]])
     dl = np.sqrt(radius2[0]) *  rotation[0] / 4
-    gmm.mean[altered[1]] = gmm.mean[altered[2]] - dl
-    gmm.mean[altered[2]] = gmm.mean[altered[2]] + dl
-    gmm.covar[altered[1:]] = np.linalg.det(gmm.covar[altered[2]])**(1/gmm.D) * np.eye(gmm.D)
-    U[altered[1]] = U[altered[2]].copy() # now 1 and 2 have same U
+    gmm.mean[changeable[1]] = gmm.mean[changeable[2]] - dl
+    gmm.mean[changeable[2]] = gmm.mean[changeable[2]] + dl
+    gmm.covar[changeable[1:]] = np.linalg.det(gmm.covar[changeable[2]])**(1/gmm.D) * np.eye(gmm.D)
+    U[changeable[1]] = U[changeable[2]].copy() # now 1 and 2 have same U
 
 
 # L-fold cross-validation of the fit function.
