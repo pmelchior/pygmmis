@@ -583,8 +583,9 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
 
         If frozen is a simple list, it will be assumed that is applies to mean
         and covariance of the specified components. It can also be a dictionary
-        with the keys "mean" and "covar" to specify them separately. In either
-        case, amplitudes will be updated to reflect any changes made.
+        with the keys "mean" and "covar" to specify them separately.
+        In either case, amplitudes will be updated to reflect any changes made.
+        If frozen["amp"] is set, it will use this list instead.
 
     Returns:
         mean log-likelihood (float), component neighborhoods (list of ints)
@@ -633,8 +634,11 @@ def fit(gmm, data, covar=None, w=0., cutoff=None, sel_callback=None, covar_callb
         if hasattr(frozen, 'keys'):
             changeable['mean'] = np.in1d(xrange(gmm.K), frozen['mean'], assume_unique=True, invert=True)
             changeable['covar'] = np.in1d(xrange(gmm.K), frozen['covar'], assume_unique=True, invert=True)
-            # amp needs to change if anything else changes
-            changeable['amp'] = changeable['mean'] | changeable['covar']
+            # unless set, amp needs to change if anything else changes
+            if "amp" in frozen.keys():
+                changeable['amp'] = np.in1d(xrange(gmm.K), frozen['amp'], assume_unique=True, invert=True)
+            else:
+                changeable['amp'] = changeable['mean'] | changeable['covar']
         else:
             changeable['mean'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
             changeable['covar'] = changeable['amp'] = changeable['mean']
