@@ -9,12 +9,14 @@ logL, U = pygmmis.fit(gmm, data) # logL = log-likelihood, U = association of dat
 ```
 However, **pyGMMis** has a few extra tricks up its sleeve. 
 
-* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is know as "Extreme Deconvolution" (code [here](https://github.com/jobovy/extreme-deconvolution)).
+* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is know as "Extreme Deconvolution" ([code](https://github.com/jobovy/extreme-deconvolution)).
 * It can deal with gaps (aka "truncated data") and variable sample completeness as long as 
   * you know the incompleteness over the entire feature space,
   * and the incompleteness does not depend on the sample density (missing at random).
 * It can incorporate a "background" distribution (implemented is a uniform one) and separate signal from background, with the former being fit by the GMM.
-* It keeps track of which components need to be evaluated in which regions of the feature space, thereby substantially increasing the execution for fragmented data. 
+* It keeps track of which components need to be evaluated in which regions of the feature space, thereby substantially increasing the execution for fragmented data.
+
+If you want more context and details on those capabilities, have a look at this [blog post](http://pmelchior.net/blog/gaussian-mixture-models-for-astronomy.html).
 
 Under the hood, **pyGMMis** uses the Expectation-Maximization procedure. When dealing with sample incompleteness it generates its best guess of the unobserved samples on the fly given the current model fit to the observed samples.
 
