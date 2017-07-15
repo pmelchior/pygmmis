@@ -1,21 +1,30 @@
 # pyGMMis
 
-Got gaps in your data? Sample observability varies? We can help.
+Need a simple and powerful Gaussian-mixture code in pure python? It can be as easy as this:
 
-**pyGMMis** is mixtures-of-Gaussians density estimation method that accounts for arbitrary incompleteness in the process that creates the samples as long as
+```python
+import pygmmis
+gmm = pygmmis.GMM(K=K, D=D)      # K components, D dimensions
+logL, U = pygmmis.fit(gmm, data) # logL = log-likelihood, U = association of data to components
+```
+However, **pyGMMis** has a few extra tricks up its sleeve. 
 
-* you know the incompleteness over the entire feature space,
-* the incompleteness does not depend on the sample density (missing at random).
+* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is know as "Extreme Deconvolution" ([code](https://github.com/jobovy/extreme-deconvolution)).
+* It can deal with gaps (aka "truncated data") and variable sample completeness as long as 
+  * you know the incompleteness over the entire feature space,
+  * and the incompleteness does not depend on the sample density (missing at random).
+* It can incorporate a "background" distribution (implemented is a uniform one) and separate signal from background, with the former being fit by the GMM.
+* It keeps track of which components need to be evaluated in which regions of the feature space, thereby substantially increasing the performance for fragmented data.
 
-Under the hood, **pyGMMis** uses the Expectation-Maximization procedure and generates its best guess of the unobserved samples on the fly.
+If you want more context and details on those capabilities, have a look at this [blog post](http://pmelchior.net/blog/gaussian-mixture-models-for-astronomy.html).
 
-It can also incorporate an uniform "background" distribution as well as independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution from which both observed and unobserved samples are drawn.
+Under the hood, **pyGMMis** uses the Expectation-Maximization procedure. When dealing with sample incompleteness it generates its best guess of the unobserved samples on the fly given the current model fit to the observed samples.
 
 ![Example of pyGMMis](tests/pygmmis.png)
 
 In the example above, the true distribution is shown as contours in the left panel. We then draw 400 samples from it (red), add Gaussian noise to them (1,2,3 sigma contours shown in blue), and select only samples within the box but outside of the circle (blue).
 
-The code is written in pure python (developed and tested in 2.7), parallelized with `multiprocessing`, can automatically segment the data into localized neighborhoods, and is capable of performing density estimation with millions of samples and thousands of model components on machines with sufficient memory.
+The code is written in pure python (developed and tested in 2.7), parallelized with `multiprocessing`, and is capable of performing density estimation with millions of samples and thousands of model components on machines with sufficient memory.
 
 More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/abs/1611.05806). Please cite the paper if you make use of this code.
 
