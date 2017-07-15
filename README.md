@@ -14,7 +14,7 @@ However, **pyGMMis** has a few extra tricks up its sleeve.
   * you know the incompleteness over the entire feature space,
   * and the incompleteness does not depend on the sample density (missing at random).
 * It can incorporate a "background" distribution (implemented is a uniform one) and separate signal from background, with the former being fit by the GMM.
-* It keeps track of which components need to be evaluated in which regions of the feature space, thereby substantially increasing the execution for fragmented data.
+* It keeps track of which components need to be evaluated in which regions of the feature space, thereby substantially increasing the performance for fragmented data.
 
 If you want more context and details on those capabilities, have a look at this [blog post](http://pmelchior.net/blog/gaussian-mixture-models-for-astronomy.html).
 
