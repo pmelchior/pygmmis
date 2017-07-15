@@ -789,6 +789,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, sel_callback=None, cov
 # run one EM step
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
 
+    # Note: T_inv (in fact (T_ik)^-1 for all samples i and components k)
+    # is very large and is unfortunately duplicated in the parallelized _Mstep.
+    # If memory is too limited, one can recompute T_inv in _Msums() instead.
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
