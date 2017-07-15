@@ -42,10 +42,10 @@ def plotResults(orig, data, gmm, patch=None, description=None, disp=None):
     # add description and complete data logL to plot
     logL = gmm(orig, as_log=True).mean()
     if description is not None:
-        ax.text(0.05, 0.95, '$\mathrm{%s}$' % description, ha='left', va='top', transform=ax.transAxes, fontsize=16)
-        ax.text(0.05, 0.9, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
+        ax.text(0.05, 0.95, r'%s' % description, ha='left', va='top', transform=ax.transAxes, fontsize=20)
+        ax.text(0.05, 0.89, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=20)
     else:
-        ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=16)
+        ax.text(0.05, 0.95, '$\log{\mathcal{L}} = %.3f$' % logL, ha='left', va='top', transform=ax.transAxes, fontsize=20)
 
     # show size of error dispersion as Circle
     if disp is not None:
@@ -56,14 +56,14 @@ def plotResults(orig, data, gmm, patch=None, description=None, disp=None):
         ax.add_artist(circ1)
         ax.add_artist(circ2)
         ax.add_artist(circ3)
-        ax.text(12.5, -2.5, r'$\sigma$', color='w', fontsize=16, ha='center', va='center')
+        ax.text(12.5, -2.5, r'$\sigma$', color='w', fontsize=20, ha='center', va='center')
 
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
     ax.set_xticks([])
     ax.set_yticks([])
-    plt.tight_layout()
-    plt.show()
+    fig.subplots_adjust(bottom=0.01, top=0.99, left=0.01, right=0.99)
+    fig.show()
 
 def plotDifferences(orig, data, gmms, avg, l, patch=None):
     fig = plt.figure(figsize=(6,6))
@@ -106,92 +106,14 @@ def plotDifferences(orig, data, gmms, avg, l, patch=None):
         else:
             ax.add_artist(copy.copy(patch))
 
-    ax.text(0.05, 0.95, '$\mathrm{Dispersion}$', ha='left', va='top', transform=ax.transAxes, fontsize=16)
+    ax.text(0.05, 0.95, 'Dispersion', ha='left', va='top', transform=ax.transAxes, fontsize=20)
 
     ax.set_xlim(-5, 15)
     ax.set_ylim(-5, 15)
     ax.set_xticks([])
     ax.set_yticks([])
-    plt.tight_layout()
-    plt.show()
-
-def plotCoverage(orig, data, gmm, patch=None, sel_callback=None):
-    fig = plt.figure(figsize=(6,6))
-    ax = fig.add_subplot(111, aspect='equal')
-
-    """
-    # plot inner and outer points
-    ax.plot(orig[:,0], orig[:,1], 'o', mfc='None', mec='r', mew=1)
-    ax.plot(data[:,0], data[:,1], 's', mfc='b', mec='None')
-    """
-
-    # prediction
-    B = 100
-    x,y = np.meshgrid(np.linspace(-5,15,B), np.linspace(-5,15,B))
-    coords = np.dstack((x.flatten(), y.flatten()))[0]
-
-    # compute sum_k(p_k(x)) for all x
-    coverage = getCoverage(gmm, coords, sel_callback=sel_callback).reshape((B,B))
-    cs = ax.contourf(np.log(coverage), np.arange(-9,1), extent=(-5,15,-5,15), cmap=plt.cm.Greys, vmax=2)
-    for c in cs.collections:
-        c.set_edgecolor(c.get_facecolor())
-
-    # plot boundary
-    if patch is not None:
-        import copy
-        if hasattr(patch, '__iter__'):
-            for p in patch:
-                ax.add_artist(copy.copy(p))
-        else:
-            ax.add_artist(copy.copy(patch))
-
-    ax.text(0.05, 0.95, '$\mathrm{Coverage}$', ha='left', va='top', transform=ax.transAxes, fontsize=16)
-    ax.set_xlim(-5, 15)
-    ax.set_ylim(-5, 15)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    plt.tight_layout()
-    plt.show()
-
-def getCoverage(gmm, coords, sel_callback=None, repeat=10, rotate=True):
-    # create a new gmm with randomly drawn components at each point in coords:
-    # estimate how this gmm can cover the volume spanned by coords
-    if sel_callback is None:
-        return np.ones(len(coords))
-    else:
-        coverage = np.zeros(len(coords))
-        from sklearn.neighbors import KDTree
-        for r in xrange(repeat):
-            sel = sel_callback(coords)
-            inv_sel = sel == False
-            coverage[sel] += 1./repeat
-
-            gmm_ = pygmmis.GMM(K=gmm.K, D=gmm.D)
-            gmm_.amp = np.random.rand(K)
-            gmm_.amp /= gmm_.amp.sum()
-            gmm_.covar = gmm.covar
-
-            if rotate:
-                # use random rotations for each component covariance
-                # from http://www.mathworks.com/matlabcentral/newsreader/view_thread/298500
-                # since we don't care about parity flips we don't have to check
-                # the determinant of R (and hence don't need R)
-                for k in xrange(gmm_.K):
-                    Q,_ = np.linalg.qr(np.random.normal(size=(gmm.D, gmm.D)), mode='complete')
-                    gmm_.covar[k] = np.dot(Q, np.dot(gmm_.covar[k], Q.T))
-
-            inside = coords[sel]
-            outside = coords[inv_sel]
-            outside_cov = coverage[inv_sel]
-            tree = KDTree(inside)
-            closest_inside = tree.query(outside, k=1, return_distance=False).flatten()
-            unique_closest = np.unique(closest_inside)
-            for c in unique_closest:
-                gmm_.mean[:] = inside[c]
-                closest_to_c = (closest_inside == c)
-                outside_cov[closest_to_c] += gmm_(outside[closest_to_c]) / gmm_(np.array([inside[c]])) / repeat
-            coverage[inv_sel] = outside_cov
-    return coverage
+    fig.subplots_adjust(bottom=0.01, top=0.99, left=0.01, right=0.99)
+    fig.show()
 
 def getBox(coords):
     box_limits = np.array([[0,0],[10,10]])
@@ -256,7 +178,7 @@ if __name__ == '__main__':
     # set up test
     N = 400             # number of samples
     K = 3               # number of components
-    R = 1               # number of runs
+    R = 10              # number of runs
     sel_type = "boxWithHole"    # type of selection
     disp = 0.7          # additive noise dispersion
     bg_amp = 0.0        # fraction of background samples
@@ -320,7 +242,7 @@ if __name__ == '__main__':
     gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(R)]
     covar_cb = partial(getCovar, disp=disp)
 
-    # 1) pygmmis without imputation, ignoring errors
+    # 1) EM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
@@ -329,9 +251,20 @@ if __name__ == '__main__':
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
-    plotResults(orig, data, avg, patch=ps, description="standard\ EM,\ ignoring\ errors")
+    plotResults(orig, data, avg, patch=ps, description="Standard EM")
 
-    # 2) pygmmis with imputation, igoring errors
+    # 2) EM without imputation, deconvolving via Extreme Deconvolution
+    start = datetime.datetime.now()
+    rng = RandomState(seed)
+    for r in xrange(R):
+        if bg is not None:
+            bg.amp = bg_amp
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+    avg = pygmmis.stack(gmms, l)
+    print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
+    plotResults(orig, data, avg, patch=ps, description="Standard EM & noise deconvolution")
+
+    # 3) pygmmis with imputation, igoring errors
     # We need a better init function to allow the model to
     # start from a good initial location and to explore the
     # volume that is spanned by the missing part of the data
@@ -346,9 +279,9 @@ if __name__ == '__main__':
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
-    plotResults(orig, data, avg, patch=ps, description="\mathtt{GMMis},\ ignoring\ errors")
+    plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$")
 
-    # 3) pygmmis with imputation, incorporating errors
+    # 4) pygmmis with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(R):
@@ -357,8 +290,8 @@ if __name__ == '__main__':
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
-    plotResults(orig, data, avg, patch=ps, description="\mathtt{GMMis}")
-    #plotDifferences(orig, data, gmms, avg, l, patch=ps)
+    plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$ & noise deconvolution")
+    plotDifferences(orig, data, gmms, avg, l, patch=ps)
     #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
 
     """
