@@ -790,7 +790,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
 # run one EM step
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
 
-    # Note: T_inv (in fact (T_ik)^-1 for all samples i and components k)
+    # NOTE: T_inv (in fact (T_ik)^-1 for all samples i and components k)
     # is very large and is unfortunately duplicated in the parallelized _Mstep.
     # If memory is too limited, one can recompute T_inv in _Msums() instead.
     log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R, background=background, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
@@ -803,7 +803,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
 
         # if there are projections / missing data, we don't know how to
         # generate those for the imputation samples
-        # Note: in principle, if there are only missing data, i.e. R is 1_D,
+        # NOTE: in principle, if there are only missing data, i.e. R is 1_D,
         # we could ignore missingness for data2 because we'll do an analytic
         # marginalization. This doesn't work if R is a non-trivial matrix.
         if R is not None:
@@ -904,23 +904,35 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
 
 # compute chi^2, and apply selections on component neighborhood based in chi^2
 def _Esum(k, U_k, gmm, data, covar=None, R=None, cutoff=None):
+    # since U_k could be None, need explicit reshape
+    d_ = data[U_k].reshape(-1, gmm.D)
+    if covar is not None:
+        if covar.shape == (gmm.D, gmm.D): # one-for-all
+            covar_ = covar
+        else: # each datum has covariance
+            covar_ = covar[U_k].reshape(-1, gmm.D, gmm.D)
+    else:
+        covar_ = 0
+    if R is not None:
+        R_ = R[U_k].reshape(-1, gmm.D, gmm.D)
+
     # p(x | k) for all x in the vicinity of k
     # determine all points within cutoff sigma from mean[k]
-    if U_k is None:
-        dx = data - gmm.mean[k]
+    if R is None:
+        dx = d_ - gmm.mean[k]
     else:
-        dx = data[U_k] - gmm.mean[k]
+        dx = d_ - np.dot(R_, gmm.mean[k])
 
-    if covar is None:
+    if covar is None and R is None:
          T_inv_k = None
          chi2 = np.einsum('...i,...ij,...j', dx, np.linalg.inv(gmm.covar[k]), dx)
     else:
         # with data errors: need to create and return T_ik = covar_i + C_k
         # and weight each datum appropriately
-        if covar.shape == (gmm.D, gmm.D): # one-for-all
-            T_inv_k = np.linalg.inv(gmm.covar[k] + covar)
-        else: # each datum has covariance
-            T_inv_k = np.linalg.inv(gmm.covar[k] + covar[U_k].reshape(len(dx), gmm.D, gmm.D))
+        if R is None:
+            T_inv_k = np.linalg.inv(gmm.covar[k] + covar_)
+        else: # need to project out missing elements: T_ik = R_i C_k R_i^R + covar_i
+            T_inv_k = np.linalg.inv(np.einsum('...ij,jk,...lk', R_, gmm.covar[k], R_) + covar_)
         chi2 = np.einsum('...i,...ij,...j', dx, T_inv_k, dx)
 
     # NOTE: close to convergence, we could stop applying the cutoff because
@@ -928,7 +940,7 @@ def _Esum(k, U_k, gmm, data, covar=None, R=None, cutoff=None):
     if cutoff is not None:
         indices = chi2 < cutoff
         chi2 = chi2[indices]
-        if covar is not None and covar.shape != (gmm.D, gmm.D):
+        if (covar is not None and covar.shape != (gmm.D, gmm.D)) or R is not None:
             T_inv_k = T_inv_k[indices]
         if U_k is None:
             U_k = np.flatnonzero(indices)
@@ -973,10 +985,14 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, R, log_S):
         # get log_q_ik by dividing with S = sum_k p_ik
         # NOTE:  this modifies log_p_k in place, but is only relevant
         # within this method since the call is parallel and its arguments
-        # therefore don't get updated.
+        # therefore don't get updated across components.
+
         # NOTE: reshape needed when U_k is None because of its
-        # implicit meaning as np.newaxis (which would create a 2D array)
+        # implicit meaning as np.newaxis
         log_p_k -= log_S[U_k].reshape(log_p_k.size)
+        d = data[U_k].reshape((log_p_k.size, gmm.D))
+        if R is not None:
+            R_ = R[U_k].reshape((log_p_k.size, gmm.D, gmm.D))
 
         # amplitude: A_k = sum_i q_ik
         A_k = np.exp(logsum(log_p_k))
@@ -984,28 +1000,36 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, R, log_S):
         # in fact: q_ik, but we treat sample index i silently everywhere
         q_k = np.exp(log_p_k)
 
+        if R is None:
+            d_m = d - gmm.mean[k]
+        else:
+            d_m = d - np.dot(R_, gmm.mean[k])
+
         # data with errors?
-        d = data[U_k].reshape((log_p_k.size, gmm.D))
-        if T_inv_k is None:
+        if T_inv_k is None and R is None:
             # mean: M_k = sum_i x_i q_ik
             M_k = (d * q_k[:,None]).sum(axis=0)
 
             # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
-            d_m = d - gmm.mean[k]
             # funny way of saying: for each point i, do the outer product
             # of d_m with its transpose, multiply with pi[i], and sum over i
             C_k = (q_k[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
         else:
-            # need temporary variables:
-            # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
-            # B_ik = C_k - C_k T_ik^-1 C_k
-            # to replace pure data-driven means and covariances
-            d_m = d - gmm.mean[k]
-            b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
-            M_k = (b_k * q_k[:,None]).sum(axis=0)
+            if R is None: # that means T_ik is not None
+                # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
+                # B_ik = C_k - C_k T_ik^-1 C_k
+                b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
+                B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
+            else:
+                # F_ik = C_k R_i^T T_ik^-1
+                F_k = np.einsum('ij,...kj,...kl', gmm.covar[k], R_, T_inv_k)
+                b_k = gmm.mean[k] + np.einsum('...ij,...j', F_k, d_m)
+                B_k = gmm.covar[k] - np.einsum('...ij,...jk,kl', F_k, R_, gmm.covar[k])
 
+                #b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
+                #B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
+            M_k = (b_k * q_k[:,None]).sum(axis=0)
             b_k -= gmm.mean[k]
-            B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
             C_k = (q_k[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
         return A_k, M_k, C_k
     else:
