@@ -7,10 +7,11 @@ import pygmmis
 gmm = pygmmis.GMM(K=K, D=D)      # K components, D dimensions
 logL, U = pygmmis.fit(gmm, data) # logL = log-likelihood, U = association of data to components
 ```
-However, **pyGMMis** has a few extra tricks up its sleeve. 
+However, **pyGMMis** has a few extra tricks up its sleeve.
 
 * It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is know as "Extreme Deconvolution" ([code](https://github.com/jobovy/extreme-deconvolution)).
-* It can deal with gaps (aka "truncated data") and variable sample completeness as long as 
+* It works with missing data (features) by setting the respective elements of the covariance matrix to a vary large value, thus effectively setting the weights of the missing feature to 0.
+* It can deal with gaps (aka "truncated data") and variable sample completeness as long as
   * you know the incompleteness over the entire feature space,
   * and the incompleteness does not depend on the sample density (missing at random).
 * It can incorporate a "background" distribution (implemented is a uniform one) and separate signal from background, with the former being fit by the GMM.
@@ -65,12 +66,19 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    * Provide a callback function that returns an estimate of the covariance at arbitrary locations.
 
    ```python
+   from functools import partial
+
+   # simply using the same covariance for all samples
+   dispersion = 1
+   default_covar = np.eye(D) * dispersion**2
+   covar_cb = partial(pygmmis.covar_callback_default, default=default)
+
+   # more sophisticated option: use the covariance of the nearest neighbor.
    def covar_tree_cb(coords, tree, covar):
        """Return the covariance of the nearest neighbor of coords in data.""""
        dist, ind = tree.query(coords, k=1)
        return covar[ind.flatten()]
 
-   from functools import partial
    from sklearn.neighbors import KDTree
    tree = KDTree(data, leaf_size=100)
    covar = pygmmis.createShared(covar)
@@ -94,7 +102,7 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    * `pygmmis.initFromSimpleGMM()`
    * `pygmmis.initFromKMeans()`
 
-   For difficult situations or if you are not happy with the convergence, you may want to define your own. The signature is: 
+   For difficult situations or if you are not happy with the convergence, you may want to define your own. The signature is:
 
    ```def init_callback(gmm, data=None, covar=None, rng=np.random)```
 
