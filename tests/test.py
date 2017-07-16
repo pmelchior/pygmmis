@@ -15,7 +15,13 @@ def plotResults(orig, data, gmm, patch=None, description=None, disp=None):
 
     # plot inner and outer points
     ax.plot(orig[:,0], orig[:,1], 'o', mfc='None', mec='r', mew=1)
-    ax.plot(data[:,0], data[:,1], 's', mfc='b', mec='None')#, mew=1)
+    missing = np.isnan(data)
+    if missing.any():
+        data_ = data.copy()
+        data_[missing] = -5 # put at limits of plotting range
+    else:
+        data_ = data
+    ax.plot(data_[:,0], data_[:,1], 's', mfc='b', mec='None')#, mew=1)
 
     # prediction
     B = 100
@@ -82,8 +88,8 @@ def plotDifferences(orig, data, gmms, avg, l, patch=None):
     pw = avg(coords).reshape((B,B))
 
     # use each run and compute weighted std
-    p = np.empty((R,B,B))
-    for r in xrange(R):
+    p = np.empty((T,B,B))
+    for r in xrange(T):
         # compute sum_k(p_k(x)) for all x
         p[r,:,:] = gmms[r](coords).reshape((B,B))
 
@@ -170,15 +176,12 @@ def getSelection(type="hole", rng=np.random):
         ps = None
     return cb, ps
 
-def getCovar(data, disp=1):
-    return disp**2 * np.eye(data.shape[1])
-
 if __name__ == '__main__':
 
     # set up test
     N = 400             # number of samples
     K = 3               # number of components
-    R = 10              # number of runs
+    T = 10              # number of runs
     sel_type = "boxWithHole"    # type of selection
     disp = 0.7          # additive noise dispersion
     bg_amp = 0.0        # fraction of background samples
@@ -238,14 +241,14 @@ if __name__ == '__main__':
     plotResults(orig, data, gmm, patch=ps, description="Truth", disp=disp)
 
     # repeated runs: store results and logL
-    l = np.empty(R)
-    gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(R)]
-    covar_cb = partial(getCovar, disp=disp)
+    l = np.empty(T)
+    gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(T)]
+    covar_cb = partial(pygmmis.covar_callback_default, default=np.eye(D)*disp**2)
 
     # 1) EM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(R):
+    for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
@@ -256,7 +259,7 @@ if __name__ == '__main__':
     # 2) EM without imputation, deconvolving via Extreme Deconvolution
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(R):
+    for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
@@ -273,7 +276,7 @@ if __name__ == '__main__':
     init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., rng=rng)
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(R):
+    for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
@@ -284,15 +287,17 @@ if __name__ == '__main__':
     # 4) pygmmis with imputation, incorporating errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(R):
+    for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$ & noise deconvolution")
-    plotDifferences(orig, data, gmms, avg, l, patch=ps)
-    #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
+
+    if T > 1:
+        plotDifferences(orig, data, gmms, avg, l, patch=ps)
+        #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
 
     """
     # stacked estimator: needs to do init by hand to keep it fixed

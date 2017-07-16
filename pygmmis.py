@@ -161,6 +161,14 @@ def chi2_cutoff(D, cutoff=3.):
     cutoff_nd = scipy.stats.chi2.ppf(confidence_1d, D)
     return cutoff_nd
 
+def covar_callback_default(coords, default=None):
+    N,D = coords.shape
+    if default.shape != (D,D):
+        raise RuntimeError("covar_callback received improper default covariance %r" % default)
+    # no need to copy since a single covariance matrix is sufficient
+    # return np.tile(default, (N,1,1))
+    return default
+
 
 class GMM(object):
     """Gaussian mixture model with K components in D dimensions.
@@ -566,7 +574,7 @@ def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, cov
         gmm: an instance if GMM
         data: numpy array (N,D)
         covar: sample noise covariance; numpy array (N,D,D) or (D,D) if i.i.d.
-        R: sample projection matrix; numpy array (N,D,D)
+        R: sample projection matrix (full rank); numpy array (N,D,D)
         w (float): minimum covariance regularization
         cutoff (float): size of component neighborhood [in 1D equivalent sigmas]
         sel_callback: completeness callback to generate imputation samples.
@@ -594,21 +602,46 @@ def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, cov
     Throws:
         RuntimeError for inconsistent argument combinations
     """
+    # if there are data (features) missing, i.e. masked as np.nan, set them to zeros
+    # and create/set covariance elements to very large value to reduce its weight
+    # to effectively zero
+    missing = np.isnan(data)
+    if missing.any():
+        data_ = createShared(data.copy())
+        data_[missing] = 0 # value does not matter as long as it's not nan
+        if covar is None:
+            covar = np.zeros((gmm.D, gmm.D))
+            # need to create covar_callback if imputation is requested
+            if sel_callback is not None:
+                from functools import partial
+                covar_callback = partial(covar_callback_default, default=np.zeros((gmm.D, gmm.D)))
+        if covar.shape == (gmm.D, gmm.D):
+            covar_ = createShared(np.tile(covar, (len(data),1,1)))
+        else:
+            covar_ = createShared(covar.copy())
+
+        large = 1e10
+        for d in range(gmm.D):
+            covar_[missing[:,d],d,d] += large
+            covar_[missing[:,d],d,d] += large
+    else:
+        data_ = data
+        covar_ = covar
 
     # init components
     if init_callback is not None:
-        init_callback(gmm, data=data, covar=covar, rng=rng)
+        init_callback(gmm, data=data_, covar=covar_, rng=rng)
 
     elif VERBOSITY:
         print("forgoing initialization: hopefully GMM was initialized...")
 
     # test if callbacks are consistent
-    if covar is not None and sel_callback is not None and covar_callback is None:
+    if sel_callback is not None and covar is not None and covar_callback is None:
         raise RuntimeError("covar is set, but covar_callback is None: imputation samples inconsistent")
 
     # cutoff cannot be used with background due to competing definitions of neighborhood
     if background is not None and cutoff is not None:
-        print("adjusting cutoff = None for background model fit")
+        print("adjusting cutoff = None for fir with background model")
         cutoff = None
 
     # set up pool
@@ -644,7 +677,7 @@ def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, cov
             changeable['mean'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
             changeable['covar'] = changeable['amp'] = changeable['mean']
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
@@ -685,10 +718,10 @@ def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, cov
             # Effectively, partial runs are as expensive as full runs.
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
 
             if log_L >= log_L_:
                 # revert to backup
