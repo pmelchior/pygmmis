@@ -41,9 +41,6 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
 1. Create a GMM object with the desired component number K and data dimensionality D:
    ```gmm = pygmmis.GMM(K=K, D=D) ```
 
-2. To avoid excessive copying of the data between separate `multiprocessing` processes, create a shared structure:
-   ```data = pygmmis.createShared(data)```
-
 3. Define a callback for the completeness function, which is called with e.g. `data` with shape (N,D) and returns an boolean array of size N whether the sample was observed or not. Two examples:
 
    ```python
@@ -71,7 +68,7 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    # simply using the same covariance for all samples
    dispersion = 1
    default_covar = np.eye(D) * dispersion**2
-   covar_cb = partial(pygmmis.covar_callback_default, default=default)
+   covar_cb = partial(pygmmis.covar_callback_default, default=default_covar)
 
    # more sophisticated option: use the covariance of the nearest neighbor.
    def covar_tree_cb(coords, tree, covar):
@@ -85,26 +82,33 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    covar_cb = partial(covar_tree_cb, tree=tree, covar=covar)
    ```
 
-5. If there is a uniform background that is unrelated to the features you want to fit, you need to define it. Caveat: Because a uniform distribution is normalizable only if its support is finite, you need to decide on the footprint over which the background model is present, e.g.:
+4. If there is a uniform background that is unrelated to the features you want to fit, you need to define it. Caveat: Because a uniform distribution is normalizable only if its support is finite, you need to decide on the footprint over which the background model is present, e.g.:
 
    ```python
-    footprint = data.min(axis=0), data.max(axis=0)
-    bg = pygmmis.Background(footprint)
-    bg.amp = 0.3
-    bg.amp_max = 0.5
-    bg.adjust_amp = True
+   footprint = data.min(axis=0), data.max(axis=0)
+   amp = 0.3
+   bg = pygmmis.Background(footprint, amp=amp)
+   # fine tuning, if desired
+   bg.amp_min = 0.1
+   bg.amp_max = 0.5
+   bg.adjust_amp = False # freezes bg.amp at current value
    ```
 
-6. Provide an initialization callback. This tells the GMM what initial parameters is should assume. We have provided a few plausible ones for your perusal:
+5. Select an initialization method. This tells the GMM what initial parameters is should assume. The options are `'minmax','random','kmeans','none'`. See the respective functions for details:
 
    * `pygmmis.initFromDataMinMax()`
    * `pygmmis.initFromDataAtRandom()`
-   * `pygmmis.initFromSimpleGMM()`
    * `pygmmis.initFromKMeans()`
 
-   For difficult situations or if you are not happy with the convergence, you may want to define your own. The signature is:
+   For difficult situations, or if you are not happy with the convergence, you may want to experiment with your own initialization. All you have to do is set `gmm.amp`, `gmm.mean`, and `gmm.covar` to desired values and use `init_method='none'`.
 
-   ```def init_callback(gmm, data=None, covar=None, rng=np.random)```
+6. Decide to freeze out any components. This makes sense if you *know* some of the properties of the components. You can freeze amplitude, mean, or covariance of any component by listing them in a dictionary, e.g:
+
+   ```python
+   frozen={"amp": [1,2], "mean": [], "covar": [1]}
+   ```
+
+   This freezes the amplitudes of component 1 and 2 (NOTE: Counting starts at 0), and the covariance of 1.
 
 7. Run the fitter:
 
@@ -121,9 +125,9 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    rng = RandomState(seed)
 
    # run EM
-   logL, U = pygmmis.fit(gmm, data, init_callback=pygmmis.initFromDataMinMax,\
+   logL, U = pygmmis.fit(gmm, data, init_method='random',\
                          sel_callback=cb, covar_callback=covar_cb, w=w, cutoff=cutoff,\
-                         background=bg, tol=tol, rng=rng)
+                         background=bg, tol=tol, frozen=frozen, rng=rng)
    ```
 
    This runs the EM procedure until tolerance is reached and returns the final mean log-likelihood of all samples, and the neighborhood of each component (indices of data samples that are within cutoff of a GMM component).

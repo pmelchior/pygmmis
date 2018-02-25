@@ -238,12 +238,11 @@ if __name__ == "__main__":
         K_ = gmm0.K #int(K*omega_cube.mean())
 
         # fit model after selection
-        data = pygmmis.createShared(data0[sel0])
+        data = data0[sel0]
 
         split_n_merge = K_/3 # 0
         gmm = pygmmis.GMM(K=K_, D=3)
-        init_cb = partial(pygmmis.initFromDataMinMax, s=0.5, rng=rng)
-        logL, U = pygmmis.fit(gmm, data, init_callback=init_cb, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
+        logL, U = pygmmis.fit(gmm, data, init_method='minmax', w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
         sample = gmm.draw(N, rng=rng)
         count_cube += binSample(sample, C)
 
@@ -253,7 +252,7 @@ if __name__ == "__main__":
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
         gmm_.covar[:,:,:] = 2*gmm.covar[:,:,:]
-        logL_, U_ = fit_forever(gmm_, data, sel_callback=sel_callback, init_callback=None, w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
+        logL_, U_ = fit_forever(gmm_, data, sel_callback=sel_callback, init_method='none', w=w, cutoff=5, split_n_merge=split_n_merge, rng=rng)
         sample_ = gmm_.draw(N, rng=rng)
         """
         gmm_ = gmm
