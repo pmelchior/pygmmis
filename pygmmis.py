@@ -365,7 +365,7 @@ class Background(object):
         adjust_amp (bool): whether amp will be adjusted as part of the fit
         amp_max (float): maximum value of amp allowed if adjust_amp=True
     """
-    def __init__(self, footprint):
+    def __init__(self, footprint, amp=0):
         """Initialize Background with a footprint.
 
         Args:
@@ -374,10 +374,11 @@ class Background(object):
         Returns:
             None
         """
-        self.amp = 0
+        self.amp = amp
         self.footprint = footprint
         self.adjust_amp = True
         self.amp_max = 1
+        self.amp_min = 0
 
     @property
     def p(self):
@@ -497,40 +498,6 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
             print "initializing spheres with s=%.2f near data points" % s
     gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
-
-def initFromSimpleGMM(gmm, data, covar=None, s=None, k=None, rng=np.random, init_callback=initFromDataAtRandom, w=0., cutoff=None, background=None, tol=1e-3, covar_factor=1.):
-    """Initialization callback to daisy-chain GMM fits.
-
-    Component amplitudes are first initialized with init_callback, then fit()
-    is run with the parameters (w, cutoff, background, tol) as specified.
-    Once done, the covariances are multiplied with covar_factor.
-
-    Args:
-        gmm: A GMM to be initialized
-        data: numpy array (N,D) to define the range of the component means
-        covar: data covariance, passed on to fit()
-        s (float): if set, sets component variances
-        k (iterable): list of components to set, is None sets all components
-        rng: numpy.random.RandomState for deterministic behavior
-        init_callback: initialization callback for first fit() run
-    Returns:
-        None
-    """
-    # 1) run GMM without error and selection (fit is essentially an init fct)
-    fit(gmm, data, covar=None, w=w, cutoff=cutoff, sel_callback=None, init_callback=init_callback, background=background, tol=tol, rng=rng)
-    # 2) adjust the covariance to allow to provide more support
-    # in missing volume
-    gmm.covar[:,:,:] *= covar_factor
-
-    # if k is set: only use fit init for given k, re-init the others
-    if k is not None:
-        k_ = set(range(gmm.K))
-        try:
-            k_len = len(gmm.amp[k])
-            k_ -= set(k)
-        except TypeError:
-            k_ -= set([k])
-        init_callback(gmm, k=list(k_), data=data, covar=covar, rng=rng)
 
 def initFromKMeans(gmm, data, covar=None, rng=np.random):
     """Initialization callback from a k-means clustering run.
@@ -1102,9 +1069,9 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
     # since B is computed over all samples, not just signal portion, need H.size
     if background is not None and background.adjust_amp:
         if H2 is 0:
-            background.amp = min(B / H.size, background.amp_max)
+            background.amp = max(min(B / H.size, background.amp_max), background.amp_min)
         else:
-            background.amp = min((B + B2) / (H.size + H2.size), background.amp_max)
+            background.amp = max(min((B + B2) / (H.size + H2.size), background.amp_max), background.amp_min)
 
 # draw from the model (+ background) and apply appropriate covariances
 def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):

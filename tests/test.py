@@ -268,18 +268,20 @@ if __name__ == '__main__':
     plotResults(orig, data, avg, patch=ps, description="Standard EM & noise deconvolution")
 
     # 3) pygmmis with imputation, igoring errors
-    # We need a better init function to allow the model to
-    # start from a good initial location and to explore the
+    # We need a good initial location to explore the
     # volume that is spanned by the missing part of the data
+    # We therefore run a standard GMM without imputation first
     # NOTE: You want to choose this carefully, depending
     # on the missingness mechanism.
-    init_cb = partial(pygmmis.initFromSimpleGMM, w=w, cutoff=cutoff, covar_factor=4., rng=rng)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
-        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=init_cb, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
+        pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        # we want to extend the components to cover the excluded areas
+        gmms[r].covar[:] *= 4
+        l[r], _ = pygmmis.fit(gmms[r], data, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$")
@@ -290,7 +292,9 @@ if __name__ == '__main__':
     for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
-        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=init_cb, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
+        pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        gmms[r].covar[:] *= 4
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$ & noise deconvolution")
@@ -298,7 +302,6 @@ if __name__ == '__main__':
     if T > 1:
         plotDifferences(orig, data, gmms, avg, l, patch=ps)
         #plotCoverage(orig, data, avg, patch=ps, sel_callback=cb)
-
     """
     # stacked estimator: needs to do init by hand to keep it fixed
     start = datetime.datetime.now()
