@@ -232,9 +232,8 @@ if __name__ == '__main__':
 
     # apply selection
     sel = cb(noisy)
-    noisy = noisy[sel]
-
-    data = pygmmis.createShared(noisy)
+    data = noisy[sel]
+    # single covariance for all samples
     covar = disp**2 * np.eye(D)
 
     # plot data vs true model
@@ -243,7 +242,6 @@ if __name__ == '__main__':
     # repeated runs: store results and logL
     l = np.empty(T)
     gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(T)]
-    covar_cb = partial(pygmmis.covar_callback_default, default=np.eye(D)*disp**2)
 
     # 1) EM without imputation, ignoring errors
     start = datetime.datetime.now()
@@ -287,6 +285,7 @@ if __name__ == '__main__':
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$")
 
     # 4) pygmmis with imputation, incorporating errors
+    covar_cb = partial(pygmmis.covar_callback_default, default=np.eye(D)*disp**2)
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in xrange(T):

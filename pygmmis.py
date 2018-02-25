@@ -593,8 +593,11 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             covar_[missing[:,d],d,d] += large
             covar_[missing[:,d],d,d] += large
     else:
-        data_ = data
-        covar_ = covar
+        data_ = createShared(data.copy())
+        if covar is None or covar.shape == (gmm.D, gmm.D):
+            covar_ = covar
+        else:
+            covar_ = createShared(covar.copy())
 
     # init components
     if init_method.lower() not in ['random', 'minmax', 'kmeans', 'none']:
