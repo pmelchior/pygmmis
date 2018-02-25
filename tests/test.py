@@ -181,7 +181,7 @@ if __name__ == '__main__':
     # set up test
     N = 400             # number of samples
     K = 3               # number of components
-    T = 10              # number of runs
+    T = 1              # number of runs
     sel_type = "boxWithHole"    # type of selection
     disp = 0.7          # additive noise dispersion
     bg_amp = 0.0        # fraction of background samples
@@ -251,7 +251,7 @@ if __name__ == '__main__':
     for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
-        l[r], _ = pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="Standard EM")
@@ -262,7 +262,7 @@ if __name__ == '__main__':
     for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
-        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="Standard EM & noise deconvolution")
@@ -278,10 +278,10 @@ if __name__ == '__main__':
     for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
-        pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
         # we want to extend the components to cover the excluded areas
         gmms[r].covar[:] *= 4
-        l[r], _ = pygmmis.fit(gmms[r], data, w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, init_method='none', w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$")
@@ -292,9 +292,9 @@ if __name__ == '__main__':
     for r in xrange(T):
         if bg is not None:
             bg.amp = bg_amp
-        pygmmis.fit(gmms[r], data, init_callback=pygmmis.initFromDataAtRandom, w=w, cutoff=cutoff, background=bg, rng=rng)
+        pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
         gmms[r].covar[:] *= 4
-        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_method='none', w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$ & noise deconvolution")

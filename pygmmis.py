@@ -527,7 +527,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, covar_callback=None, init_callback=None, background=None, tol=1e-3, frozen=None, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, covar_callback=None, background=None, tol=1e-3, frozen=None, split_n_merge=False, rng=np.random):
     """Fit GMM to data.
 
     If given, init_callback is called to set up the GMM components. Then, the
@@ -542,12 +542,13 @@ def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, cov
         data: numpy array (N,D)
         covar: sample noise covariance; numpy array (N,D,D) or (D,D) if i.i.d.
         R: sample projection matrix (full rank); numpy array (N,D,D)
+        init_method (string): one of ['random', 'minmax', 'kmeans', 'none']
+            defines the method to initialize the GMM components
         w (float): minimum covariance regularization
         cutoff (float): size of component neighborhood [in 1D equivalent sigmas]
         sel_callback: completeness callback to generate imputation samples.
         covar_callback: covariance callback for imputation samples.
             needs to be present if sel_callback and covar are set.
-        init_callback: callback to initialize the components
         background: an instance of Background if simultaneous fitting is desired
         tol (float): tolerance for covergence of mean log-likelihood
         frozen (iterable or dict): index list of components that are not updated
@@ -596,15 +597,18 @@ def fit(gmm, data, covar=None, R=None, w=0., cutoff=None, sel_callback=None, cov
         covar_ = covar
 
     # init components
-    if init_callback is not None:
-        init_callback(gmm, data=data_, covar=covar_, rng=rng)
-
-    elif VERBOSITY:
-        print("forgoing initialization: hopefully GMM was initialized...")
+    if init_method.lower() not in ['random', 'minmax', 'kmeans', 'none']:
+        raise NotImplementedError("init_mehod %s not in ['random', 'minmax', 'kmeans', 'none']" % init_method)
+    if init_method.lower() == 'random':
+        initFromDataAtRandom(gmm, data_, covar=covar_, rng=rng)
+    if init_method.lower() == 'minmax':
+        initFromDataMinMax(gmm, data_, covar=covar_, rng=rng)
+    if init_method.lower() == 'kmeans':
+        initFromKMeans(gmm, data_, covar=covar_, rng=rng)
 
     # test if callbacks are consistent
     if sel_callback is not None and covar is not None and covar_callback is None:
-        raise RuntimeError("covar is set, but covar_callback is None: imputation samples inconsistent")
+        raise NotImplementedError("covar is set, but covar_callback is None: imputation samples inconsistent")
 
     # cutoff cannot be used with background due to competing definitions of neighborhood
     if background is not None and cutoff is not None:
