@@ -89,7 +89,7 @@ def plotDifferences(orig, data, gmms, avg, l, patch=None):
 
     # use each run and compute weighted std
     p = np.empty((T,B,B))
-    for r in xrange(T):
+    for r in range(T):
         # compute sum_k(p_k(x)) for all x
         p[r,:,:] = gmms[r](coords).reshape((B,B))
 
@@ -181,7 +181,7 @@ if __name__ == '__main__':
     # set up test
     N = 400             # number of samples
     K = 3               # number of components
-    T = 1              # number of runs
+    T = 1               # number of runs
     sel_type = "boxWithHole"    # type of selection
     disp = 0.7          # additive noise dispersion
     bg_amp = 0.0        # fraction of background samples
@@ -241,12 +241,12 @@ if __name__ == '__main__':
 
     # repeated runs: store results and logL
     l = np.empty(T)
-    gmms = [pygmmis.GMM(K=K, D=D) for r in xrange(T)]
+    gmms = [pygmmis.GMM(K=K, D=D) for r in range(T)]
 
     # 1) EM without imputation, ignoring errors
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(T):
+    for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
@@ -257,7 +257,7 @@ if __name__ == '__main__':
     # 2) EM without imputation, deconvolving via Extreme Deconvolution
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(T):
+    for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, w=w, cutoff=cutoff, background=bg, rng=rng)
@@ -273,7 +273,7 @@ if __name__ == '__main__':
     # on the missingness mechanism.
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(T):
+    for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
@@ -288,7 +288,7 @@ if __name__ == '__main__':
     covar_cb = partial(pygmmis.covar_callback_default, default=np.eye(D)*disp**2)
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(T):
+    for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
@@ -305,9 +305,9 @@ if __name__ == '__main__':
     # stacked estimator: needs to do init by hand to keep it fixed
     start = datetime.datetime.now()
     rng = RandomState(seed)
-    for r in xrange(R):
+    for r in range(R):
         init_cb(gmms[r], data=data, covar=covar, rng=rng)
-    kwargs = [dict(covar=covar, init_callback=None, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng) for i in xrange(R)]
+    kwargs = [dict(covar=covar, init_callback=None, w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng) for i in range(R)]
     stacked = pygmmis.stack_fit(gmms, data, kwargs, L=10, rng=rng)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, stacked, patch=ps, description="Stacked")

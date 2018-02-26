@@ -43,10 +43,18 @@ def _unpickle_method(func_name, obj, cls):
 			break
 	return func.__get__(obj, cls)
 
-import copy_reg
 import types
+# python 2 -> 3 adjustments
+try:
+    import copy_reg
+except ImportError:
+    import copyreg as copy_reg
 copy_reg.pickle(types.MethodType, _pickle_method, _unpickle_method)
 
+try:
+    xrange
+except NameError:
+    xrange = range
 
 # Blantant copy from Erin Sheldon's esutil
 # https://github.com/esheldon/esutil/blob/master/esutil/numpy_util.py
@@ -452,7 +460,7 @@ def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
         if VERBOSITY >= 2:
-            print "initializing spheres with s=%.2f in data domain" % s
+            print ("initializing spheres with s=%.2f in data domain" % s)
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
@@ -495,7 +503,7 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
         if VERBOSITY >= 2:
-            print "initializing spheres with s=%.2f near data points" % s
+            print ("initializing spheres with s=%.2f near data points" % s)
     gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
@@ -743,7 +751,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     N0 = len(data) # size of original (unobscured) data set (signal and background)
     N2 = 0         # size of imputed signal sample
 
-    while it < MAXITER or MAXITER is None: # limit loop in case of slow convergence
+    while MAXITER is None or it < MAXITER: # limit loop in case of slow convergence
 
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 

@@ -30,13 +30,13 @@ def initCube(gmm, w=0, rng=np.random):
     alpha = K
     gmm.amp[:] = rng.dirichlet(alpha*np.ones(gmm.K)/K, 1)[0]
     gmm.mean[:,:] = rng.rand(gmm.K,gmm.D)
-    for k in xrange(gmm.K):
+    for k in range(gmm.K):
         gmm.covar[k] = np.diag((w + rng.rand(gmm.D) / 30)**2)
     # use random rotations for each component covariance
     # from http://www.mathworks.com/matlabcentral/newsreader/view_thread/298500
     # since we don't care about parity flips we don't have to check
     # the determinant of R (and hence don't need R)
-    for k in xrange(gmm.K):
+    for k in range(gmm.K):
         Q,_ = np.linalg.qr(rng.normal(size=(gmm.D, gmm.D)), mode='complete')
         gmm.covar[k] = np.dot(Q, np.dot(gmm.covar[k], Q.T))
 
@@ -59,9 +59,9 @@ def drawWithNbh(gmm, size=1, rng=np.random):
     ind = rng.choice(gmm.K, size=size, p=(gmm.amp/gmm.amp.sum()))
     samples = np.empty((size, gmm.D))
     N_k = np.bincount(ind, minlength=gmm.K)
-    nbh = [None for k in xrange(gmm.K)]
+    nbh = [None for k in range(gmm.K)]
     counter = 0
-    for k in xrange(gmm.K):
+    for k in range(gmm.K):
         s = N_k[k]
         samples[counter:counter+s] = rng.multivariate_normal(gmm.mean[k], gmm.covar[k], size=s)
         nbh[k] = np.arange(counter, counter+s)
@@ -106,19 +106,19 @@ def GMMSel(coords, gmm, covar=None, sel_gmm=None, cutoff_nd=3., rng=np.random):
     # if within 1 sigma of any component: you're out!
     import multiprocessing, parmap
     n_chunks, chunksize = sel_gmm._mp_chunksize()
-    inside = np.array(parmap.map(insideComponent, xrange(sel_gmm.K), sel_gmm, coords, covar, cutoff_nd, chunksize=chunksize))
+    inside = np.array(parmap.map(insideComponent, range(sel_gmm.K), sel_gmm, coords, covar, cutoff_nd, chunksize=chunksize))
     return np.max(inside, axis=0)
 
 def max_posterior(gmm, U, coords, covar=None):
     import multiprocessing, parmap
     pool = multiprocessing.Pool()
     n_chunks, chunksize = gmm._mp_chunksize()
-    log_p = [[] for k in xrange(gmm.K)]
+    log_p = [[] for k in range(gmm.K)]
     log_S = np.zeros(len(coords))
     H = np.zeros(len(coords), dtype="bool")
     k = 0
     for log_p[k], U[k], _ in \
-    parmap.starmap(pygmmis._Estep, zip(xrange(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+    parmap.starmap(pygmmis._Estep, zip(range(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
         log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
         H[U[k]] = 1
         k += 1
@@ -126,7 +126,7 @@ def max_posterior(gmm, U, coords, covar=None):
 
     max_q = np.zeros(len(coords))
     max_k = np.zeros(len(coords), dtype='uint32')
-    for k in xrange(gmm.K):
+    for k in range(gmm.K):
         q_k = np.exp(log_p[k] - log_S[U[k]])
         max_k[U[k]] = np.where(max_q[U[k]] < q_k, k, max_k[U[k]])
         max_q[U[k]] = np.maximum(max_q[U[k]],q_k)
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     del random
     """
     omega_cube = np.ones((C,C,C))
-    for c in xrange(C):
+    for c in range(C):
         omega_cube[c,:,:] *= 1 - (c+0.5)/C
 
     count_cube = np.zeros((C,C,C))
@@ -181,8 +181,8 @@ if __name__ == "__main__":
 
     cutoff_nd = pygmmis.chi2_cutoff(D, cutoff=inner_cutoff)
     counter = 0
-    for r in xrange(R):
-        print "start"
+    for r in range(R):
+        print ("start")
         # create original sample from GMM
         gmm0 = pygmmis.GMM(K=K, D=D)
         initCube(gmm0, w=w*10, rng=rng) # use larger size floor than in fit
@@ -193,7 +193,7 @@ if __name__ == "__main__":
 
         # how often is each component used
         comp0 = np.empty(len(data0), dtype='uint32')
-        for k in xrange(gmm0.K):
+        for k in range(gmm0.K):
             comp0[nbh0[k]] = k
         count0 = np.bincount(comp0, minlength=gmm0.K)
 
@@ -207,7 +207,7 @@ if __name__ == "__main__":
         # restrict to "safe" components
         safe = frac__ >  1./1 * 1./ K
         if safe.sum() < gmm0.K:
-            print "reset to safe components"
+            print ("reset to safe components")
             gmm0.amp = gmm0.amp[safe]
             gmm0.amp /= gmm0.amp.sum()
             gmm0.mean = gmm0.mean[safe]
@@ -220,7 +220,7 @@ if __name__ == "__main__":
             # recompute effective Omega and frac
             # how often is each component used
             comp0 = np.empty(len(data0), dtype='uint32')
-            for k in xrange(gmm0.K):
+            for k in range(gmm0.K):
                 comp0[nbh0[k]] = k
             count0 = np.bincount(comp0, minlength=gmm0.K)
             comp = comp0[sel0]
@@ -267,7 +267,7 @@ if __name__ == "__main__":
         # under selection, that threshold applies to the observed sample.
         #
         # 1) compute fraction of observed points for each component of gmm0
-        for k in xrange(K_):
+        for k in range(K_):
             # select data that is within cutoff of any component of sel_gmm
             sel__ = GMMSel(data0[nbh0[k]], gmm=None, sel_gmm=gmm_, cutoff_nd=cutoff_nd, rng=rng)
             assoc_frac[k + counter] = sel__.sum() * 1./ nbh0[k].size
@@ -276,7 +276,7 @@ if __name__ == "__main__":
         # 2) test which components have majority of points associated with
         # any fit component
         max_k = max_posterior(gmm, U, data0)
-        for k in xrange(K_):
+        for k in range(K_):
             posterior[k + counter] = np.bincount(max_k[comp0 == k]).max() * 1./ (comp0 == k).sum()
         """
 
@@ -364,7 +364,7 @@ if __name__ == "__main__":
     ax.set_zlim3d(0,1)
 
     ax = plotPoints(sample_, s=1, alpha=0.5)
-    for k in xrange(gmm0.K):
+    for k in range(gmm0.K):
         ax.text(gmm_.mean[k,0]+0.03, gmm_.mean[k,1]+0.03, gmm_.mean[k,2]+0.03, "%d" % k, color='r', zorder=1000)
     plotPoints(gmm0.mean, c='g', s=400, ax=ax, alpha=0.5, zorder=100)
     plotPoints(gmm_.mean, c='r', s=400, ax=ax, alpha=0.5, zorder=100)
