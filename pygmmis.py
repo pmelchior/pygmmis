@@ -642,9 +642,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     T_inv = [None for k in xrange(gmm.K)] # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]     # U = {x close to k}
 
-    if VERBOSITY:
-        global VERB_BUFFER
-
     changeable = {"amp": slice(None), "mean": slice(None), "covar": slice(None)}
     if frozen is not None:
         if hasattr(frozen, 'keys'):
@@ -740,7 +737,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
 
     it = 0
     if VERBOSITY:
-        global VERB_BUFFER
         print("\nITER\tPOINTS\tIMPUTED\tORIG\tLOG_L\tSTABLE")
 
     # save backup
