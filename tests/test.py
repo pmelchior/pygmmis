@@ -189,8 +189,9 @@ if __name__ == '__main__':
     w = 0.1             # minimum covariance regularization [data units]
     cutoff = 5          # cutoff distance between components [sigma]
     seed = 8366         # seed value
+    oversampling = 10   # for missing data: imputation samples per observed sample
+    # show EM iteration results
     logging.basicConfig(format='%(message)s',level=logging.INFO)
-    pygmmis.OVERSAMPLING = 10
 
     # define RNG for run
     from numpy.random import RandomState
@@ -280,7 +281,7 @@ if __name__ == '__main__':
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
         # we want to extend the components to cover the excluded areas
         gmms[r].covar[:] *= 4
-        l[r], _ = pygmmis.fit(gmms[r], data, init_method='none', w=w,  cutoff=cutoff, sel_callback=cb, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, init_method='none', w=w,  cutoff=cutoff, sel_callback=cb,  oversampling=oversampling, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$")
@@ -294,7 +295,7 @@ if __name__ == '__main__':
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
         gmms[r].covar[:] *= 4
-        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_method='none', w=w, cutoff=cutoff, sel_callback=cb, covar_callback=covar_cb, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_method='none', w=w, cutoff=cutoff, sel_callback=cb, oversampling=oversampling, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$ & noise deconvolution")

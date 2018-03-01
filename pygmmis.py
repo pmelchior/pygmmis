@@ -419,8 +419,6 @@ class Background(object):
 # Begin of fit functions
 ############################
 
-#: Oversampling used for imputation sample, as large as feasible
-OVERSAMPLING = 4
 #: Maximal iteration counter: [int, None]
 MAXITER = None
 
@@ -536,14 +534,11 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, covar_callback=None, background=None, tol=1e-3, frozen=None, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, tol=1e-3, frozen=None, split_n_merge=False, rng=np.random):
     """Fit GMM to data.
 
     If given, init_callback is called to set up the GMM components. Then, the
     EM sequence is repeated until the mean log-likelihood converges within tol.
-
-    OVERSAMPLING defines the number if imputation samples per data sample.
-        Value of 1 is fine but may become instable. Set as high as feasible.
 
     Args:
         gmm: an instance if GMM
@@ -555,6 +550,9 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         w (float): minimum covariance regularization
         cutoff (float): size of component neighborhood [in 1D equivalent sigmas]
         sel_callback: completeness callback to generate imputation samples.
+        oversampling (int): number of imputation samples per data sample.
+            only used if sel_callback is set.
+            value of 1 is fine but results are noisy. Set as high as feasible.
         covar_callback: covariance callback for imputation samples.
             needs to be present if sel_callback and covar are set.
         background: an instance of Background if simultaneous fitting is desired
@@ -656,7 +654,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             changeable['mean'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
             changeable['covar'] = changeable['amp'] = changeable['mean']
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
@@ -695,10 +693,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             # Effectively, partial runs are as expensive as full runs.
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
 
             if log_L >= log_L_:
                 # revert to backup
@@ -716,7 +714,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     return log_L, U
 
 # run EM sequence
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -745,7 +743,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
 
     while MAXITER is None or it < MAXITER: # limit loop in case of slow convergence
 
-        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -788,7 +786,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     return log_L, N, N2
 
 # run one EM step
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
 
     # NOTE: T_inv (in fact (T_ik)^-1 for all samples i and components k)
     # is very large and is unfortunately duplicated in the parallelized _Mstep.
@@ -811,9 +809,9 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        data2, covar2, N0 = draw(gmm, len(data)*OVERSAMPLING, sel_callback=sel_callback, orig_size=N0*OVERSAMPLING, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
+        data2, covar2, N0 = draw(gmm, len(data)*oversampling, sel_callback=sel_callback, orig_size=N0*oversampling, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
         U2 = [None for k in xrange(gmm.K)]
-        N0 = int(N0/OVERSAMPLING)
+        N0 = int(N0/oversampling)
 
         if len(data2) > 0:
             log_S2 = np.zeros(len(data2))
@@ -826,11 +824,11 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
             A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, R=R2,  cutoff=cutoff, background=background, pool=pool, chunksize=chunksize)
 
             # normalize foer oversampling
-            A2 /= OVERSAMPLING
-            M2 /= OVERSAMPLING
-            C2 /= OVERSAMPLING
-            B2 /= OVERSAMPLING
-            N2 = N2/OVERSAMPLING # need floating point precision in update
+            A2 /= oversampling
+            M2 /= oversampling
+            C2 /= oversampling
+            B2 /= oversampling
+            N2 = N2/oversampling # need floating point precision in update
 
             # check which components are predominantly outside selection
             sel_outside = A2 > tol * A
