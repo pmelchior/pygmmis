@@ -419,9 +419,6 @@ class Background(object):
 # Begin of fit functions
 ############################
 
-#: Maximal iteration counter: [int, None]
-MAXITER = None
-
 def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     """Initialization callback for uniform random component means.
 
@@ -534,7 +531,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, tol=1e-3, frozen=None, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, tol=1e-3, maxiter=None, frozen=None, split_n_merge=False, rng=np.random):
     """Fit GMM to data.
 
     If given, init_callback is called to set up the GMM components. Then, the
@@ -557,6 +554,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             needs to be present if sel_callback and covar are set.
         background: an instance of Background if simultaneous fitting is desired
         tol (float): tolerance for covergence of mean log-likelihood
+        maxiter (int): maximum number of iterations of EM
         frozen (iterable or dict): index list of components that are not updated
         split_n_merge (int): number of split & merge attempts
         rng: numpy.random.RandomState for deterministic behavior
@@ -654,7 +652,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             changeable['mean'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
             changeable['covar'] = changeable['amp'] = changeable['mean']
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, tol=tol, rng=rng)
+    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
@@ -693,10 +691,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             # Effectively, partial runs are as expensive as full runs.
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, maxiter=maxiter, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, maxiter=maxiter, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
 
             if log_L >= log_L_:
                 # revert to backup
@@ -714,7 +712,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     return log_L, U
 
 # run EM sequence
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -741,7 +739,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     N0 = len(data) # size of original (unobscured) data set (signal and background)
     N2 = 0         # size of imputed signal sample
 
-    while MAXITER is None or it < MAXITER: # limit loop in case of slow convergence
+    while maxiter is None or it < maxiter: # limit loop in case of slow convergence
 
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
