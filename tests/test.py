@@ -8,6 +8,7 @@ import matplotlib.lines as lines
 import matplotlib.cm
 import datetime
 from functools import partial
+import logging
 
 def plotResults(orig, data, gmm, patch=None, description=None, disp=None):
     fig = plt.figure(figsize=(6,6))
@@ -188,7 +189,7 @@ if __name__ == '__main__':
     w = 0.1             # minimum covariance regularization [data units]
     cutoff = 5          # cutoff distance between components [sigma]
     seed = 8366         # seed value
-    pygmmis.VERBOSITY = 1
+    logging.basicConfig(format='%(message)s',level=logging.INFO)
     pygmmis.OVERSAMPLING = 10
 
     # define RNG for run

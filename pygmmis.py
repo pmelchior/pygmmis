@@ -2,6 +2,9 @@ from __future__ import division
 import numpy as np
 import ctypes
 
+import logging
+logger = logging.getLogger("pygmmis")
+
 def createShared(a, dtype=ctypes.c_double):
     """Create a shared array to be used for multiprocessing's processes.
 
@@ -416,8 +419,6 @@ class Background(object):
 # Begin of fit functions
 ############################
 
-#: Verbosity level: [0,1,2]
-VERBOSITY = False
 #: Oversampling used for imputation sample, as large as feasible
 OVERSAMPLING = 4
 #: Maximal iteration counter: [int, None]
@@ -459,8 +460,8 @@ def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
         from scipy.special import gamma
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
-        if VERBOSITY >= 2:
-            print ("initializing spheres with s=%.2f in data domain" % s)
+        logger.info("initializing spheres with s=%.2f in data domain" % s)
+
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
 def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
@@ -502,8 +503,8 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
         max_pos = data.max(axis=0)
         vol_data = np.prod(max_pos-min_pos)
         s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
-        if VERBOSITY >= 2:
-            print ("initializing spheres with s=%.2f near data points" % s)
+        logger.info("initializing spheres with s=%.2f near data points" % s)
+
     gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
 
@@ -541,7 +542,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     If given, init_callback is called to set up the GMM components. Then, the
     EM sequence is repeated until the mean log-likelihood converges within tol.
 
-    VERBOSITY controls output during the EM steps [0,1,2]
     OVERSAMPLING defines the number if imputation samples per data sample.
         Value of 1 is fine but may become instable. Set as high as feasible.
 
@@ -623,7 +623,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
 
     # cutoff cannot be used with background due to competing definitions of neighborhood
     if background is not None and cutoff is not None:
-        print("adjusting cutoff = None for fir with background model")
+        logger.info("adjusting cutoff = None for fit with background model")
         cutoff = None
 
     # set up pool
@@ -662,7 +662,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     # if so, keep backup copy
     gmm_ = None
     if frozen is not None and split_n_merge:
-        print("forgoing split'n'merge because some components are frozen")
+        logger.info("forgoing split'n'merge because some components are frozen")
 
     else:
         while split_n_merge and gmm.K >= 3:
@@ -676,9 +676,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             U_ = [U[k].copy() for k in xrange(gmm.K)]
 
             changing, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
-
-            if VERBOSITY:
-                print ("merging %d and %d, splitting %d" % tuple(changing))
+            logger.info("merging %d and %d, splitting %d" % tuple(changing))
 
             # modify components
             _update_snm(gmm, changing, U, N+N2, cleanup)
@@ -708,8 +706,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
                 gmm.mean[:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
                 U = U_
-                if VERBOSITY:
-                    print ("split'n'merge likelihood decreased: reverting to previous model")
+                logger.info ("split'n'merge likelihood decreased: reverting to previous model")
                 break
 
             log_L = log_L_
@@ -736,8 +733,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.25)
 
     it = 0
-    if VERBOSITY:
-        print("\nITER\tPOINTS\tIMPUTED\tORIG\tLOG_L\tSTABLE")
+    logger.info("ITER\tPOINTS\tIMPUTED\tORIG\tLOG_L\tSTABLE")
 
     # save backup
     gmm_ = GMM(gmm.K, gmm.D)
@@ -754,9 +750,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
         moved = np.flatnonzero(shift2 > shift_cutoff)
-
-        if VERBOSITY:
-            print("%s%d\t%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, N0, log_L_, gmm.K - moved.size))
+        logger.info("%s%d\t%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, N0, log_L_, gmm.K - moved.size))
 
         # convergence tests:
         if it > 0 and log_L_ < log_L + tol:
@@ -766,13 +760,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
                 gmm.amp[:] = gmm_.amp[:]
                 gmm.mean[:,:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
-                if VERBOSITY:
-                    print("likelihood decreased: reverting to previous model")
+                logger.info("likelihood decreased: reverting to previous model")
                 break
             elif moved.size == 0:
                 log_L = log_L_
-                if VERBOSITY:
-                    print ("likelihood converged within tolerance %r: stopping here." % tol)
+                logger.info("likelihood converged within tolerance %r: stopping here." % tol)
                 break
 
         # force update to U for all moved components
@@ -780,8 +772,8 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
             for k in moved:
                 U[k] = None
 
-        if VERBOSITY >= 2 and moved.size:
-            print ("resetting neighborhoods of moving components: (" + ("%d," * moved.size + ")") % tuple(moved))
+        if moved.size:
+            logger.debug("resetting neighborhoods of moving components: (" + ("%d," * moved.size + ")") % tuple(moved))
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
@@ -792,9 +784,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         gmm_.covar[:,:,:] = gmm.covar[:,:,:]
 
         it += 1
-
-    if VERBOSITY:
-        print ("")
 
     return log_L, N, N2
 
@@ -845,8 +834,8 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
 
             # check which components are predominantly outside selection
             sel_outside = A2 > tol * A
-            if VERBOSITY >= 2 and sel_outside.any():
-                print ("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
+            if sel_outside.any():
+                logger.debug("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
     _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
 
@@ -905,9 +894,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
             if T_inv[k] is not None and T_inv[k].shape != (gmm.D, gmm.D):
                 T_inv[k] = T_inv[k][H]
 
-        if VERBOSITY:
-            print("BG%d\t%d\t%d\t%.3f" % (it, len(H), (H==0).sum(), background.amp))
-
+        logger.info("BG%d\t%d\t%d\t%.3f" % (it, len(H), (H==0).sum(), background.amp))
         log_L = np.log((1-background.amp)*log_S + background.amp * background.p).mean()
         log_S[:] = np.log(log_S[:])
 
@@ -1212,9 +1199,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     # merge two smallest components and clean up from the bottom
     cleanup = False
     if merge_jk[0] == 0 and merge_jk[1] == 0:
-        global VERBOSITY
-        if VERBOSITY >= 2:
-            print ("neighborhoods disjunct. merging components %d and %d" % tuple(merge_jk))
+        logger.debug("neighborhoods disjunct. merging components %d and %d" % tuple(merge_jk))
         merge_jk = np.argsort(gmm.amp)[:2]
         cleanup = True
 
@@ -1287,9 +1272,7 @@ def _update_snm(gmm, changeable, U, N, cleanup):
 def cv_fit(gmm, data, L=10, **kwargs):
     N = len(data)
     lcv = np.empty(N)
-
-    if VERBOSITY:
-        print ("running %d-fold cross-validation ..." % L)
+    logger.info("running %d-fold cross-validation ..." % L)
 
     # CV and stacking can't have probabilistic inits that depends on
     # data or subsets thereof
@@ -1366,22 +1349,19 @@ def stack_fit(gmms, data, kwargs, L=10, tol=1e-5, rng=np.random):
     log_p_k = np.empty_like(lcvs)
     log_S = np.empty(N)
     it = 0
-    if VERBOSITY:
-        print ("optimizing stacking weights\n")
-        print ("ITER\tLOG_L")
+    logger.info("optimizing stacking weights\n")
+    logger.info("ITER\tLOG_L")
+
     while True and it < 20:
         log_p_k[:,:] = lcvs + np.log(beta)[:,None]
         log_S[:] = logsum(log_p_k)
         log_p_k[:,:] -= log_S
         beta[:] = np.exp(logsum(log_p_k, axis=1)) / N
         logL_ = log_S.mean()
-        if VERBOSITY:
-            print ("STACK%d\t%.4f" % (it, logL_))
+        logger.info("STACK%d\t%.4f" % (it, logL_))
 
         if it > 0 and logL_ - logL < tol:
             break
         logL = logL_
         it += 1
-    if VERBOSITY:
-        print ("")
     return stack(gmms, beta)

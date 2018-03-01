@@ -153,7 +153,7 @@ if __name__ == "__main__":
     seed = 42#np.random.randint(1, 10000)
     from numpy.random import RandomState
     rng = RandomState(seed)
-    pygmmis.VERBOSITY = 1
+    logging.basicConfig(format='%(message)s',level=logging.INFO)
 
     # define selection and create Omega in cube:
     # expensive, only do once
