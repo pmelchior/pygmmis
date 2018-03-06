@@ -560,8 +560,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         rng: numpy.random.RandomState for deterministic behavior
 
     Notes:
-        If background is set, it implies cutoff=None.
-
         If frozen is a simple list, it will be assumed that is applies to mean
         and covariance of the specified components. It can also be a dictionary
         with the keys "mean" and "covar" to specify them separately.
@@ -616,11 +614,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     # test if callbacks are consistent
     if sel_callback is not None and covar is not None and covar_callback is None:
         raise NotImplementedError("covar is set, but covar_callback is None: imputation samples inconsistent")
-
-    # cutoff cannot be used with background due to competing definitions of neighborhood
-    if background is not None and cutoff is not None:
-        logger.info("adjusting cutoff = None for fit with background model")
-        cutoff = None
 
     # set up pool
     import multiprocessing
@@ -740,7 +733,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     N2 = 0         # size of imputed signal sample
 
     while maxiter is None or it < maxiter: # limit loop in case of slow convergence
-
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
@@ -840,59 +832,28 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
 # perform E step calculations.
 # If cutoff is set, this will also set the neighborhoods U
 def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
+    # compute p(i | k) for each k independently in the pool
+    # need S = sum_k p(i | k) for further calculation
+    # also N = {i | i in neighborhood[k]} for any k
     import parmap
-    if background is None:
-        # compute p(i | k) for each k independently in the pool
-        # need S = sum_k p(i | k) for further calculation
-        # also N = {i | i in neighborhood[k]} for any k
-        log_S[:] = 0
-        H[:] = 0
-        k = 0
-        for log_p[k], U[k], T_inv[k] in \
-        parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, cutoff, pool=pool, chunksize=chunksize):
-            log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
-            H[U[k]] = 1
-            k += 1
+    log_S[:] = 0
+    H[:] = 0
+    k = 0
+    for log_p[k], U[k], T_inv[k] in \
+    parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, cutoff, pool=pool, chunksize=chunksize):
+        if background is not None:
+            log_p[k] += np.log(1-background.amp)
+        log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
+        H[U[k]] = 1
+        k += 1
 
-        # need log(S), but since log(0) isn't a good idea, need to restrict to N_
+    if background is not None:
+        log_S[:] = np.log(log_S + background.amp * background.p)
+        log_L = log_S.mean()
+    else:
+        # need log(S), but since log(0) isn't a good idea, need to restrict to H
         log_S[H] = np.log(log_S[H])
         log_L = log_S[H].mean()
-
-    # determine which points belong to background:
-    # compare uniform background model with GMM,
-    # use H to store association to signal vs background
-    # that decision conflicts with per-component U's.
-    # also, if log_S would only be estimated for the points associated with the
-    # signal, it would also underestimated the probabilities under the joint model.
-    # Thus, we ignore any cutoff and compute p(x|k) for all x and k
-    else:
-
-        # reset signal U
-        for k in xrange(gmm.K):
-            U[k] = None
-
-        # don't use cutoff and don't update H:
-        # for the signal part: set U[k] = H for the M-step
-        k = 0
-        log_S[:] = 0
-        for log_p[k], U[k], T_inv[k] in \
-        parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, None, pool=pool, chunksize=chunksize):
-            log_S += np.exp(log_p[k]) # actually S, not logS; need all points here for log_L below
-            k += 1
-
-        p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + (1-background.amp)*log_S)
-        H[:] = q_bg < rng.rand(len(data)) # 0.5
-
-        for k in xrange(gmm.K):
-            U[k] = H # shallow copy
-            log_p[k] = log_p[k][H]
-            if T_inv[k] is not None and T_inv[k].shape != (gmm.D, gmm.D):
-                T_inv[k] = T_inv[k][H]
-
-        logger.info("BG%d\t%d\t%d\t%.3f" % (it, len(H), (H==0).sum(), background.amp))
-        log_L = np.log((1-background.amp)*log_S + background.amp * background.p).mean()
-        log_S[:] = np.log(log_S[:])
 
     return log_L
 
@@ -954,8 +915,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, R=None, cutoff=None
     A = np.empty(gmm.K)                 # sum for amplitudes
     M = np.empty((gmm.K, gmm.D))        # ... means
     C = np.empty((gmm.K, gmm.D, gmm.D)) # ... covariances
-    N = H.sum()
-    B = 0
+    N = len(data)
 
     # perform sums for M step in the pool
     # NOTE: in a partial run, could work on changeable components only;
@@ -968,66 +928,69 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, R=None, cutoff=None
 
     if background is not None:
         p_bg = background.amp * background.p
-        q_bg = p_bg / (p_bg + (1-background.amp)*np.exp(log_S))
-        B = q_bg.sum()
+        log_q_bg = np.log(p_bg) - log_S
+        B = np.exp(logsum(log_q_bg)) # equivalent to A_k in _Msums
+    else:
+        B = 0
 
     return A,M,C,N,B
 
 # compute moments for the Mstep
 def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, R, log_S):
-    if log_p_k.size:
-        # get log_q_ik by dividing with S = sum_k p_ik
-        # NOTE:  this modifies log_p_k in place, but is only relevant
-        # within this method since the call is parallel and its arguments
-        # therefore don't get updated across components.
-
-        # NOTE: reshape needed when U_k is None because of its
-        # implicit meaning as np.newaxis
-        log_p_k -= log_S[U_k].reshape(log_p_k.size)
-        d = data[U_k].reshape((log_p_k.size, gmm.D))
-        if R is not None:
-            R_ = R[U_k].reshape((log_p_k.size, gmm.D, gmm.D))
-
-        # amplitude: A_k = sum_i q_ik
-        A_k = np.exp(logsum(log_p_k))
-
-        # in fact: q_ik, but we treat sample index i silently everywhere
-        q_k = np.exp(log_p_k)
-
-        if R is None:
-            d_m = d - gmm.mean[k]
-        else:
-            d_m = d - np.dot(R_, gmm.mean[k])
-
-        # data with errors?
-        if T_inv_k is None and R is None:
-            # mean: M_k = sum_i x_i q_ik
-            M_k = (d * q_k[:,None]).sum(axis=0)
-
-            # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
-            # funny way of saying: for each point i, do the outer product
-            # of d_m with its transpose, multiply with pi[i], and sum over i
-            C_k = (q_k[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
-        else:
-            if R is None: # that means T_ik is not None
-                # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
-                # B_ik = C_k - C_k T_ik^-1 C_k
-                b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
-                B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
-            else:
-                # F_ik = C_k R_i^T T_ik^-1
-                F_k = np.einsum('ij,...kj,...kl', gmm.covar[k], R_, T_inv_k)
-                b_k = gmm.mean[k] + np.einsum('...ij,...j', F_k, d_m)
-                B_k = gmm.covar[k] - np.einsum('...ij,...jk,kl', F_k, R_, gmm.covar[k])
-
-                #b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
-                #B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
-            M_k = (b_k * q_k[:,None]).sum(axis=0)
-            b_k -= gmm.mean[k]
-            C_k = (q_k[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
-        return A_k, M_k, C_k
-    else:
+    if log_p_k.size == 0:
         return 0,0,0
+
+    # get log_q_ik by dividing with S = sum_k p_ik
+    # NOTE:  this modifies log_p_k in place, but is only relevant
+    # within this method since the call is parallel and its arguments
+    # therefore don't get updated across components.
+
+    # NOTE: reshape needed when U_k is None because of its
+    # implicit meaning as np.newaxis
+    log_p_k -= log_S[U_k].reshape(log_p_k.size)
+    d = data[U_k].reshape((log_p_k.size, gmm.D))
+    if R is not None:
+        R_ = R[U_k].reshape((log_p_k.size, gmm.D, gmm.D))
+
+    # amplitude: A_k = sum_i q_ik
+    A_k = np.exp(logsum(log_p_k))
+
+    # in fact: q_ik, but we treat sample index i silently everywhere
+    q_k = np.exp(log_p_k)
+
+    if R is None:
+        d_m = d - gmm.mean[k]
+    else:
+        d_m = d - np.dot(R_, gmm.mean[k])
+
+    # data with errors?
+    if T_inv_k is None and R is None:
+        # mean: M_k = sum_i x_i q_ik
+        M_k = (d * q_k[:,None]).sum(axis=0)
+
+        # covariance: C_k = sum_i (x_i - mu_k)^T(x_i - mu_k) q_ik
+        # funny way of saying: for each point i, do the outer product
+        # of d_m with its transpose, multiply with pi[i], and sum over i
+        C_k = (q_k[:, None, None] * d_m[:, :, None] * d_m[:, None, :]).sum(axis=0)
+    else:
+        if R is None: # that means T_ik is not None
+            # b_ik = mu_k + C_k T_ik^-1 (x_i - mu_k)
+            # B_ik = C_k - C_k T_ik^-1 C_k
+            b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
+            B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
+        else:
+            # F_ik = C_k R_i^T T_ik^-1
+            F_k = np.einsum('ij,...kj,...kl', gmm.covar[k], R_, T_inv_k)
+            b_k = gmm.mean[k] + np.einsum('...ij,...j', F_k, d_m)
+            B_k = gmm.covar[k] - np.einsum('...ij,...jk,kl', F_k, R_, gmm.covar[k])
+
+            #b_k = gmm.mean[k] + np.einsum('ij,...jk,...k', gmm.covar[k], T_inv_k, d_m)
+            #B_k = gmm.covar[k] - np.einsum('ij,...jk,...kl', gmm.covar[k], T_inv_k, gmm.covar[k])
+        M_k = (b_k * q_k[:,None]).sum(axis=0)
+        b_k -= gmm.mean[k]
+        C_k = (q_k[:, None, None] * (b_k[:, :, None] * b_k[:, None, :] + B_k)).sum(axis=0)
+    return A_k, M_k, C_k
+
 
 # update component with the moment matrices.
 # If changeable is set, update only those components and renormalize the amplitudes
@@ -1040,7 +1003,7 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
     else:
         # Bovy eq. 31
         gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (A + A2)[changeable['amp']].sum() * (1 - (gmm.amp[~changeable['amp']]).sum())
-    # because of finite precision during the imputation: renormalize
+    # because of finite precision during the imputation or background fitting: renormalize
     gmm.amp /= gmm.amp.sum()
 
     # mean updateL
@@ -1062,10 +1025,7 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
     # recompute background amplitude;
     # since B is computed over all samples, not just signal portion, need H.size
     if background is not None and background.adjust_amp:
-        if H2 is 0:
-            background.amp = max(min(B / H.size, background.amp_max), background.amp_min)
-        else:
-            background.amp = max(min((B + B2) / (H.size + H2.size), background.amp_max), background.amp_min)
+        background.amp = max(min((B + B2) / (N + N2), background.amp_max), background.amp_min)
 
 # draw from the model (+ background) and apply appropriate covariances
 def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):

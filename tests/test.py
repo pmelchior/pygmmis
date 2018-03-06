@@ -152,20 +152,20 @@ def getAll(coords):
 def getSelection(type="hole", rng=np.random):
     if type == "hole":
         cb = getHole
-        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='b', lw=3, ls='dashed')
+        ps = patches.Circle([6.5, 6.], radius=2, fc="none", ec='k', lw=1, ls='dashed')
     if type == "box":
         cb = getBox
-        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='b', lw=3, ls='dashed')
+        ps = patches.Rectangle([0,0], 10, 10, fc="none", ec='k', lw=1, ls='dashed')
     if type == "boxWithHole":
         cb = getBoxWithHole
         ps = [patches.Circle([6.5, 6.], radius=2, fc="none", ec='k', lw=1, ls='dashed'),
             patches.Rectangle([0,0], 10, 10, fc="none", ec='k', lw=1, ls='dashed')]
     if type == "cut":
         cb = getCut
-        ps = lines.Line2D([6, 6],[-5, 15], ls='dotted', lw=2, color='b')
+        ps = lines.Line2D([6, 6],[-5, 15], ls='dotted', lw=1, color='k')
     if type == "tapered":
         cb = partial(getTaperedDensity, rng=rng)
-        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', lw=2, color='b')
+        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', lw=1, color='k')
     if type == "under":
         cb = getUnder
         ps = None
@@ -183,15 +183,15 @@ if __name__ == '__main__':
     N = 400             # number of samples
     K = 3               # number of components
     T = 1               # number of runs
-    sel_type = "boxWithHole"    # type of selection
+    sel_type = "cut"    # type of selection
     disp = 0.7          # additive noise dispersion
-    bg_amp = 0.0        # fraction of background samples
+    bg_amp = 0.3        # fraction of background samples
     w = 0.1             # minimum covariance regularization [data units]
     cutoff = 5          # cutoff distance between components [sigma]
     seed = 8366         # seed value
     oversampling = 10   # for missing data: imputation samples per observed sample
     # show EM iteration results
-    logging.basicConfig(format='%(message)s',level=logging.INFO)
+    logging.basicConfig(format='%(message)s',level=logging.DEBUG)
 
     # define RNG for run
     from numpy.random import RandomState
@@ -251,6 +251,7 @@ if __name__ == '__main__':
     for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
+            #bg.adjust_amp = False
         l[r], _ = pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
