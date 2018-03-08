@@ -643,7 +643,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         if all(isinstance(item, int) for item in frozen):
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
         elif hasattr(frozen, 'keys') and np.in1d(["amp","mean","covar"], tuple(frozen.keys()), assume_unique=True).any():
-            print ('ere')
             if "amp" in frozen.keys():
                 changeable['amp'] = np.in1d(xrange(gmm.K), frozen['amp'], assume_unique=True, invert=True)
             if "mean" in frozen.keys():
@@ -652,7 +651,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
                 changeable['covar'] = np.in1d(xrange(gmm.K), frozen['covar'], assume_unique=True, invert=True)
         else:
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
-        print (frozen,changeable)
 
     log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
 
