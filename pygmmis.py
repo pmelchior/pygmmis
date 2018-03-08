@@ -639,17 +639,19 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     # TODO: make frozen more robust!
     changeable = {"amp": slice(None), "mean": slice(None), "covar": slice(None)}
     if frozen is not None:
-        if hasattr(frozen, 'keys'):
-            changeable['mean'] = np.in1d(xrange(gmm.K), frozen['mean'], assume_unique=True, invert=True)
-            changeable['covar'] = np.in1d(xrange(gmm.K), frozen['covar'], assume_unique=True, invert=True)
-            # unless set, amp needs to change if anything else changes
+        if all(isinstance(item, int) for item in frozen):
+            changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
+        elif hasattr(frozen, 'keys') and np.in1d(["amp","mean","covar"], tuple(frozen.keys()), assume_unique=True).any():
+            print ('ere')
             if "amp" in frozen.keys():
                 changeable['amp'] = np.in1d(xrange(gmm.K), frozen['amp'], assume_unique=True, invert=True)
-            else:
-                changeable['amp'] = changeable['mean'] | changeable['covar']
+            if "mean" in frozen.keys():
+                changeable['mean'] = np.in1d(xrange(gmm.K), frozen['mean'], assume_unique=True, invert=True)
+            if "covar" in frozen.keys():
+                changeable['covar'] = np.in1d(xrange(gmm.K), frozen['covar'], assume_unique=True, invert=True)
         else:
-            changeable['mean'] = np.in1d(xrange(gmm.K), frozen, assume_unique=True, invert=True)
-            changeable['covar'] = changeable['amp'] = changeable['mean']
+            raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
+        print (frozen,changeable)
 
     log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, log_p_bg=log_p_bg, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
 
