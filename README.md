@@ -116,9 +116,7 @@ More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/a
    w = 0.1    # minimum covariance regularization, same units as data
    cutoff = 5 # segment the data set into neighborhood within 5 sigma around components
    tol = 1e-3 # tolerance on logL to terminate EM
-   pygmmis.VERBOSITY = 1      # 0,1,2
-   pygmmis.OVERSAMPLING = 10  # number of imputation samples per data sample
-
+   
    # define RNG for deterministic behavior
    from numpy.random import RandomState
    seed = 42
