@@ -636,7 +636,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     else:
         log_p_bg = None
 
-    # TODO: make frozen more robust!
     changeable = {"amp": slice(None), "mean": slice(None), "covar": slice(None)}
     if frozen is not None:
         if all(isinstance(item, int) for item in frozen):
@@ -861,9 +860,13 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
         log_p_bg[0] = np.log(background.amp * background.p)
         if covar is not None:
             log_error = np.zeros(len(data))
+            x0,x1 = background.footprint
             for d in range(gmm.D):
-                denom = np.sqrt(2 * covar[d,d])
-                log_error += np.log(np.real(scipy.special.erf((data[:,d] - background.footprint[0][d])/denom) - scipy.special.erf((data[:,d] - background.footprint[1][d])/denom))/2)
+                if covar.shape == (gmm.D, gmm.D): # one-for-all
+                    denom = np.sqrt(2 * covar[d,d])
+                else:
+                    denom = np.sqrt(2 * covar[:,d,d])
+                log_error += np.log(0.5 * np.real(scipy.special.erf((data[:,d] - x0[d])/denom) - scipy.special.erf((data[:,d] - x1[d])/denom)))
             log_p_bg[0] += log_error
         log_S[:] = np.log(log_S + np.exp(log_p_bg[0]))
         log_L = log_S.mean()
