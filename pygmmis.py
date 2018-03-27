@@ -632,6 +632,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     T_inv = [None for k in xrange(gmm.K)]      # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]          # U = {x close to k}
     if background is not None:
+        gmm.amp *= 1 - background.amp
         log_p_bg = [None]                      # log_p_bg = p(x|BG)
     else:
         log_p_bg = None
@@ -757,6 +758,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         status_mess += "\t%.3f\t%d" % (log_L_, gmm.K - moved.size)
         logger.info(status_mess)
 
+        """
         # convergence tests:
         if it > 0 and log_L_ < log_L + tol:
             # with imputation or background fitting, observed logL can decrease
@@ -771,6 +773,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
                 log_L = log_L_
                 logger.info("likelihood converged within tolerance %r: stopping here." % tol)
                 break
+        """
 
         # force update to U for all moved components
         if cutoff is not None:
@@ -862,8 +865,6 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
     k = 0
     for log_p[k], U[k], T_inv[k] in \
     parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, cutoff, pool=pool, chunksize=chunksize):
-        if background is not None:
-            log_p[k] += np.log(1-background.amp)
         log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
         H[U[k]] = 1
         k += 1
@@ -880,6 +881,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
                     denom = np.sqrt(2 * covar[:,d,d])
                 log_error += np.log(0.5 * np.real(scipy.special.erf((data[:,d] - x0[d])/denom) - scipy.special.erf((data[:,d] - x1[d])/denom)))
             log_p_bg[0] += log_error
+            print ("HERE", background.amp * background.p, np.exp(log_error.mean()))
         log_S[:] = np.log(log_S + np.exp(log_p_bg[0]))
         log_L = log_S.mean()
     else:
@@ -1035,7 +1037,7 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
         # Bovy eq. 31
         gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (A + A2)[changeable['amp']].sum() * (1 - (gmm.amp[~changeable['amp']]).sum())
     # because of finite precision during the imputation or background fitting: renormalize
-    gmm.amp /= gmm.amp.sum()
+    #gmm.amp /= gmm.amp.sum()
 
     # mean updateL
     gmm.mean[changeable['mean'],:] = (M + M2)[changeable['mean'],:]/(A + A2)[changeable['mean'],None]
