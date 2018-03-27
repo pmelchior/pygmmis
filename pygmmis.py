@@ -727,7 +727,13 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.25)
 
     it = 0
-    logger.info("ITER\tPOINTS\tIMPUTED\tORIG\tLOG_L\tSTABLE")
+    header = "ITER\tSAMPLES"
+    if sel_callback is not None:
+        header += "\tIMPUTED\tORIG"
+    if background is not None:
+        header += "\tBG_AMP"
+    header += "\tLOG_L\tSTABLE"
+    logger.info(header)
 
     # save backup
     gmm_ = GMM(gmm.K, gmm.D)
@@ -743,7 +749,13 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
         moved = np.flatnonzero(shift2 > shift_cutoff)
-        logger.info("%s%d\t%d\t%d\t%d\t%.3f\t%d" % (prefix, it, N, N2, N0, log_L_, gmm.K - moved.size))
+        status_mess = "%s%d\t%d" % (prefix, it, N)
+        if sel_callback is not None:
+            status_mess += "\t%d\t%d" % (N2, N0)
+        if background is not None:
+            status_mess += "\t%.3f" % background.amp
+        status_mess += "\t%.3f\t%d" % (log_L_, gmm.K - moved.size)
+        logger.info(status_mess)
 
         # convergence tests:
         if it > 0 and log_L_ < log_L + tol:
