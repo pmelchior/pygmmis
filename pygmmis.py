@@ -743,6 +743,8 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     gmm_.covar[:,:,:] = gmm.covar[:,:,:]
     N0 = len(data) # size of original (unobscured) data set (signal and background)
     N2 = 0         # size of imputed signal sample
+    if background is not None:
+        bg_amp_ = background.amp
 
     while maxiter is None or it < maxiter: # limit loop in case of slow convergence
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, log_p_bg=log_p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
@@ -754,7 +756,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         if sel_callback is not None:
             status_mess += "\t%d\t%d" % (N2, N0)
         if background is not None:
-            status_mess += "\t%.3f" % background.amp
+            status_mess += "\t%.3f" % bg_amp_
         status_mess += "\t%.3f\t%d" % (log_L_, gmm.K - moved.size)
         logger.info(status_mess)
 
@@ -767,6 +769,8 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
                 gmm.amp[:] = gmm_.amp[:]
                 gmm.mean[:,:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
+                if background is not None:
+                    background.amp = bg_amp_
                 logger.info("likelihood decreased: reverting to previous model")
                 break
             elif moved.size == 0:
@@ -790,6 +794,8 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         gmm_.amp[:] = gmm.amp[:]
         gmm_.mean[:,:] = gmm.mean[:,:]
         gmm_.covar[:,:,:] = gmm.covar[:,:,:]
+        if background is not None:
+            bg_amp_ = background.amp
 
         it += 1
 
