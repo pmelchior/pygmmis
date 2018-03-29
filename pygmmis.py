@@ -885,9 +885,8 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
                     denom = np.sqrt(2 * covar[d,d])
                 else:
                     denom = np.sqrt(2 * covar[:,d,d])
-                log_error += np.log(0.5 * np.real(scipy.special.erf((data[:,d] - x0[d])/denom) - scipy.special.erf((data[:,d] - x1[d])/denom)))
+                log_error += np.log(np.real(scipy.special.erf((data[:,d] - x0[d])/denom) - scipy.special.erf((data[:,d] - x1[d])/denom))/2)
             log_p_bg[0] += log_error
-            print ("HERE", background.amp * background.p, np.exp(log_error.mean()))
         log_S[:] = np.log(log_S + np.exp(log_p_bg[0]))
         log_L = log_S.mean()
     else:
@@ -1035,15 +1034,21 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, R, log_S):
 # If changeable is set, update only those components and renormalize the amplitudes
 def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, background=None):
 
+    # recompute background amplitude
+    if background is not None and background.adjust_amp:
+        background.amp = max(min((B + B2) / (N + N2), background.amp_max), background.amp_min)
+
     # amp update:
     # for partial update: need to update amp for any component that is changeable
     if not hasattr(changeable['amp'], '__iter__'): # it's a slice(None), not a bool array
         gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (N + N2)
     else:
-        # Bovy eq. 31
-        gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (A + A2)[changeable['amp']].sum() * (1 - (gmm.amp[~changeable['amp']]).sum())
-    # because of finite precision during the imputation or background fitting: renormalize
-    #gmm.amp /= gmm.amp.sum()
+        # Bovy eq. 31, with correction for bg.amp if needed
+        if background is None:
+            total = 1
+        else:
+            total = 1 - background.amp
+        gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (A + A2)[changeable['amp']].sum() * (total - (gmm.amp[~changeable['amp']]).sum())
 
     # mean updateL
     gmm.mean[changeable['mean'],:] = (M + M2)[changeable['mean'],:]/(A + A2)[changeable['mean'],None]
@@ -1060,11 +1065,6 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
         gmm.covar[changeable['covar'],:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changeable['covar'],:,:] / (A + A2 + 1)[changeable['covar'],None,None]
     else:
         gmm.covar[changeable['covar'],:,:] = (C + C2)[changeable['covar'],:,:] / (A + A2)[changeable['covar'],None,None]
-
-    # recompute background amplitude;
-    # since B is computed over all samples, not just signal portion, need H.size
-    if background is not None and background.adjust_amp:
-        background.amp = max(min((B + B2) / (N + N2), background.amp_max), background.amp_min)
 
 # draw from the model (+ background) and apply appropriate covariances
 def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
