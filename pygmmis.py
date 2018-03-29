@@ -632,7 +632,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     T_inv = [None for k in xrange(gmm.K)]      # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]          # U = {x close to k}
     if background is not None:
-        gmm.amp *= 1 - background.amp
+        gmm.amp *= 1 - background.amp          # GMM amp + BG amp = 1
         log_p_bg = [None]                      # log_p_bg = p(x|BG)
     else:
         log_p_bg = None
@@ -760,7 +760,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         status_mess += "\t%.3f\t%d" % (log_L_, gmm.K - moved.size)
         logger.info(status_mess)
 
-        """
         # convergence tests:
         if it > 0 and log_L_ < log_L + tol:
             # with imputation or background fitting, observed logL can decrease
@@ -777,7 +776,6 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
                 log_L = log_L_
                 logger.info("likelihood converged within tolerance %r: stopping here." % tol)
                 break
-        """
 
         # force update to U for all moved components
         if cutoff is not None:
@@ -885,7 +883,8 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
                     denom = np.sqrt(2 * covar[d,d])
                 else:
                     denom = np.sqrt(2 * covar[:,d,d])
-                log_error += np.log(np.real(scipy.special.erf((data[:,d] - x0[d])/denom) - scipy.special.erf((data[:,d] - x1[d])/denom))/2)
+                p_bg_i = np.real(scipy.special.erf((data[:,d] - x0[d])/denom)  - scipy.special.erf((data[:,d] - x1[d])/denom)) / 2
+                log_error += np.log(p_bg_i)
             log_p_bg[0] += log_error
         log_S[:] = np.log(log_S + np.exp(log_p_bg[0]))
         log_L = log_S.mean()
