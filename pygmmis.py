@@ -942,7 +942,11 @@ def _Esum(k, U_k, gmm, data, covar=None, R=None, cutoff=None):
             U_k = U_k[indices]
 
     # prevent tiny negative determinants to mess up
-    (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
+    if covar is None:
+        (sign, logdet) = np.linalg.slogdet(gmm.covar[k])
+    else:
+        (sign, logdet) = np.linalg.slogdet(T_inv_k)
+        sign *= -1 # since det(T^-1) = 1/det(T)
 
     log2piD2 = np.log(2*np.pi)*(0.5*gmm.D)
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
