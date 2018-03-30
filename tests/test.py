@@ -183,15 +183,15 @@ if __name__ == '__main__':
     N = 400             # number of samples
     K = 3               # number of components
     T = 1               # number of runs
-    sel_type = "cut"    # type of selection
-    disp = 0.7          # additive noise dispersion
-    bg_amp = 0.3        # fraction of background samples
+    sel_type = "boxWithHole"    # type of selection
+    disp = 0.5          # additive noise dispersion
+    bg_amp = 0.0        # fraction of background samples
     w = 0.1             # minimum covariance regularization [data units]
     cutoff = 5          # cutoff distance between components [sigma]
-    seed = 8366         # seed value
+    seed = 8365         # seed value
     oversampling = 10   # for missing data: imputation samples per observed sample
     # show EM iteration results
-    logging.basicConfig(format='%(message)s',level=logging.DEBUG)
+    logging.basicConfig(format='%(message)s',level=logging.INFO)
 
     # define RNG for run
     from numpy.random import RandomState
@@ -251,7 +251,6 @@ if __name__ == '__main__':
     for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
-            #bg.adjust_amp = False
         l[r], _ = pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
