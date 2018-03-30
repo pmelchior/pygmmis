@@ -4,7 +4,7 @@ setup(
     name="pygmmis",
     description="Gaussian mixture model for incomplete, truncated, and noisy data",
     long_description="Gaussian mixture model for incomplete, truncated, and noisy data",
-    version='1.0.1',
+    version='1.1.0',
     author="Peter Melchior",
     author_email="peter.m.melchior@gmail.com",
     license='MIT',
