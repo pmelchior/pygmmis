@@ -573,6 +573,8 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     Throws:
         RuntimeError for inconsistent argument combinations
     """
+
+    N = len(data)
     # if there are data (features) missing, i.e. masked as np.nan, set them to zeros
     # and create/set covariance elements to very large value to reduce its weight
     # to effectively zero
@@ -587,7 +589,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
                 from functools import partial
                 covar_callback = partial(covar_callback_default, default=np.zeros((gmm.D, gmm.D)))
         if covar.shape == (gmm.D, gmm.D):
-            covar_ = createShared(np.tile(covar, (len(data),1,1)))
+            covar_ = createShared(np.tile(covar, (N,1,1)))
         else:
             covar_ = createShared(covar.copy())
 
@@ -621,22 +623,32 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     pool = multiprocessing.Pool()
     n_chunks, chunksize = gmm._mp_chunksize()
 
-    # sum_k p(x|k) -> S
-    # extra precautions for cases when some points are treated as outliers
+    # containers
+    # precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
-    log_S = createShared(np.zeros(len(data)))  # S = sum_k p(x|k)
+    log_S = createShared(np.zeros(N))          # S = sum_k p(x|k)
     # FIXME: create sheared boolean array results in
     # AttributeError: 'c_bool' object has no attribute '__array_interface__'
-    H = np.zeros(len(data), dtype='bool')      # H == 1 for points in the fit
+    H = np.zeros(N, dtype='bool')              # H == 1 for points in the fit
     log_p = [[] for k in xrange(gmm.K)]        # P = p(x|k) for x in U[k]
     T_inv = [None for k in xrange(gmm.K)]      # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]          # U = {x close to k}
+    p_bg = None
     if background is not None:
         gmm.amp *= 1 - background.amp          # GMM amp + BG amp = 1
         p_bg = [None]                          # p_bg = p(x|BG), no log because values are larger
-    else:
-        p_bg = None
+        if covar is not None:
+            # check if covar is diagonal and issue warning if not
+            mess = "background model will only consider diagonal elements of covar"
+            nondiag = ~np.eye(gmm.D, dtype='bool')
+            if covar.shape == (gmm.D, gmm.D):
+                if (covar[nondiag] != 0).any():
+                    logger.warning(mess)
+            else:
+                if (covar[np.tile(nondiag,(N,1,1))] != 0).any():
+                    logger.warning(mess)
 
+    # check if all component parameters can be changed
     changeable = {"amp": slice(None), "mean": slice(None), "covar": slice(None)}
     if frozen is not None:
         if all(isinstance(item, int) for item in frozen):
@@ -657,7 +669,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     # if so, keep backup copy
     gmm_ = None
     if frozen is not None and split_n_merge:
-        logger.info("forgoing split'n'merge because some components are frozen")
+        logger.warning("forgoing split'n'merge because some components are frozen")
 
     else:
         while split_n_merge and gmm.K >= 3:
