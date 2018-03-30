@@ -1,3 +1,6 @@
+[![PyPI](https://img.shields.io/pypi/v/pygmmis.svg)](https://pypi.python.org/pypi/pygmmis/)
+[![License](https://img.shields.io/github/license/pmelchior/pygmmis.svg)](https://github.com/pmelchior/pygmmis/blob/master/LICENSE.md)
+
 # pyGMMis
 
 Need a simple and powerful Gaussian-mixture code in pure python? It can be as easy as this:
@@ -29,7 +32,15 @@ The code is written in pure python (developed and tested in 2.7), parallelized w
 
 More details are in the paper of [Melchior & Goulding (2016)](http://arxiv.org/abs/1611.05806). Please cite the paper if you make use of this code.
 
-## Prerequisites
+## Installation and Prerequisites
+
+You can either clone the repo and install by `python setup.py install` or get the latest release with
+
+```
+pip install pygmmis
+```
+
+Dependencies:
 
 * numpy
 * scipy
