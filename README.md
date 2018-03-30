@@ -13,7 +13,7 @@ logL, U = pygmmis.fit(gmm, data) # logL = log-likelihood, U = association of dat
 ```
 However, **pyGMMis** has a few extra tricks up its sleeve.
 
-* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is know as "Extreme Deconvolution" ([code](https://github.com/jobovy/extreme-deconvolution)).
+* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is known as "Extreme Deconvolution" ([code](https://github.com/jobovy/extreme-deconvolution)).
 * It works with missing data (features) by setting the respective elements of the covariance matrix to a vary large value, thus effectively setting the weights of the missing feature to 0.
 * It can deal with gaps (aka "truncated data") and variable sample completeness as long as
   * you know the incompleteness over the entire feature space,
