@@ -99,7 +99,7 @@ Dependencies:
 
    # more sophisticated option: use the covariance of the nearest neighbor.
    def covar_tree_cb(coords, tree, covar):
-       """Return the covariance of the nearest neighbor of coords in data.""""
+       """Return the covariance of the nearest neighbor of coords in data."""
        dist, ind = tree.query(coords, k=1)
        return covar[ind.flatten()]
 
