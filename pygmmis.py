@@ -663,14 +663,20 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         else:
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
 
-    log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
+    try:
+        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
+    except Exception:
+        # cleanup
+        pool.close()
+        pool.join()
+        del data_, covar_, log_S
+        raise
 
     # should we try to improve by split'n'merge of components?
     # if so, keep backup copy
     gmm_ = None
     if frozen is not None and split_n_merge:
         logger.warning("forgoing split'n'merge because some components are frozen")
-
     else:
         while split_n_merge and gmm.K >= 3:
 
@@ -720,6 +726,8 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             split_n_merge -= 1
 
     pool.close()
+    pool.join()
+    del data_, covar_, log_S
     return log_L, U
 
 # run EM sequence
