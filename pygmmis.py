@@ -532,7 +532,9 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, tol=1e-3, maxiter=None, frozen=None, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10,
+        covar_callback=None, background=None, tol=1e-3, maxiter=None, frozen=None, split_n_merge=False,
+        rng=np.random, backend=None):
     """Fit GMM to data.
 
     If given, init_callback is called to set up the GMM components. Then, the
@@ -663,8 +665,13 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         else:
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
 
+    if backend is not None:
+        backend.setup(maxiter, mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
     try:
-        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
+        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
+                           oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool,
+                           chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable,
+                           maxiter=maxiter, tol=tol, rng=rng, backend=backend)
     except Exception:
         # cleanup
         pool.close()
@@ -689,11 +696,12 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             U_ = [U[k].copy() for k in xrange(gmm.K)]
 
             changing, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
+            if backend is not None:
+                backend.new_chain(maxiter)
             logger.info("merging %d and %d, splitting %d" % tuple(changing))
 
             # modify components
             _update_snm(gmm, changing, U, N+N2, cleanup)
-
             # run partial EM on changeable components
             # NOTE: for a partial run, we'd only need the change to Log_S from the
             # changeable components. However, the neighborhoods can change from _update_snm
@@ -708,10 +716,16 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             # Effectively, partial runs are as expensive as full runs.
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
+                                  oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
+                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_P",
+                                  changeable=changeable, rng=rng, backend=backend)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
+                                  oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
+                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_F",
+                                  changeable=changeable, rng=rng, backend=backend)
 
             if log_L >= log_L_:
                 # revert to backup
@@ -720,6 +734,8 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
                 U = U_
                 logger.info ("split'n'merge likelihood decreased: reverting to previous model")
+                if backend is not None:
+                    backend.switch_chain('master')
                 break
 
             log_L = log_L_
@@ -731,7 +747,9 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     return log_L, U
 
 # run EM sequence
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None,
+        background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, tol=1e-3, prefix="", changeable=None,
+        rng=np.random, backend=None):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -816,6 +834,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
             bg_amp_ = background.amp
 
         it += 1
+
+        if backend is not None:
+            backend.save(mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=log_L)
 
     return log_L, N, N2
 
