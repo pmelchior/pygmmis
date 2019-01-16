@@ -3,6 +3,8 @@ import numpy as np
 import scipy.special
 import ctypes
 
+from .convergence import ConvergenceDetector
+
 import logging
 logger = logging.getLogger("pygmmis")
 
@@ -533,7 +535,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
 
 
 def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10,
-        covar_callback=None, background=None, tol=1e-3, maxiter=None, frozen=None, split_n_merge=False,
+        covar_callback=None, background=None, tol=1e-3, maxiter=None, burnin=0, frozen=None, split_n_merge=False,
         rng=np.random, backend=None):
     """Fit GMM to data.
 
@@ -671,7 +673,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
                            oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool,
                            chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable,
-                           maxiter=maxiter, tol=tol, rng=rng, backend=backend)
+                           maxiter=maxiter, burnin=burnin, tol=tol, rng=rng, backend=backend)
     except Exception:
         # cleanup
         pool.close()
@@ -718,13 +720,13 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
             log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
                                   oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
-                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_P",
+                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, tol=tol, prefix="SNM_P",
                                   changeable=changeable, rng=rng, backend=backend)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
             log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
                                   oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
-                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_F",
+                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, tol=tol, prefix="SNM_F",
                                   changeable=changeable, rng=rng, backend=backend)
 
             if log_L >= log_L_:
@@ -748,8 +750,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
 
 # run EM sequence
 def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None,
-        background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, tol=1e-3, prefix="", changeable=None,
+        background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, burnin=0, tol=1e-3, prefix="", changeable=None,
         rng=np.random, backend=None):
+
+    detector = ConvergenceDetector(tolerance=tol, significance=3, burnin=burnin)
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -784,8 +788,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     if background is not None:
         bg_amp_ = background.amp
 
+    log_Ls = []
     while maxiter is None or it < maxiter: # limit loop in case of slow convergence
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+        log_Ls.append(log_L_)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -799,10 +805,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         logger.info(status_mess)
 
         # convergence tests:
-        if it > 0 and log_L_ < log_L + tol:
+        converged, info = detector.test_convergence(log_Ls)
+        if converged:
             # with imputation or background fitting, observed logL can decrease
             # allow some slack, but revert to previous model if it gets worse
-            if log_L_ < log_L - tol:
+            if log_Ls[-1] < log_Ls[0] - detector.tolerance:
                 gmm.amp[:] = gmm_.amp[:]
                 gmm.mean[:,:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]

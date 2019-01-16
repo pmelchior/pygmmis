@@ -26,7 +26,7 @@ If you want more context and details on those capabilities, have a look at this 
 
 Under the hood, **pyGMMis** uses the Expectation-Maximization procedure. When dealing with sample incompleteness it generates its best guess of the unobserved samples on the fly given the current model fit to the observed samples.
 
-![Example of pyGMMis](tests/pygmmis.png)
+![Example of pyGMMis](pygmmis/tests/pygmmis.png)
 
 In the example above, the true distribution is shown as contours in the left panel. We then draw 400 samples from it (red), add Gaussian noise to them (1,2,3 sigma contours shown in blue), and select only samples within the box but outside of the circle (blue).
 
@@ -182,4 +182,4 @@ Dependencies:
 
 
 
-For a complete example, have a look at [the test script](tests/test.py). For requests and bug reports, please open an issue.
+For a complete example, have a look at [the test script](pygmmis/tests/test.py). For requests and bug reports, please open an issue.

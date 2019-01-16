@@ -51,12 +51,13 @@ class ConvergenceDetector(object):
             logging.info("{}-{}: Converged within {}".format(self.burnin, n, self.tolerance))
             return True, info
         if (not significant_gradient) and (not big_gradient):
-            logging.info("{}-{}: Gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
+            logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
             return True, info
         if significant_gradient and big_gradient:
-            logging.info("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
-            if gradient > 0:
-                self.burnin = len(backend)
+            logging.debug("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
+            self.burnin = len(backend)
+            # if gradient > 0:
+            #     self.burnin = len(backend)
             # else:
             #     logging.info("{}-{}: LogL not increasing as it should. Bad start point? Waiting until it increases beyond the initial guess".format(self.burnin, n))
         return False, info
@@ -115,8 +116,8 @@ if __name__ == '__main__':
     logging.basicConfig(format='%(message)s', level=logging.INFO)
     detector = ConvergenceDetector(tolerance=1e-6, significance=3, burnin=0)
 
-    step = 5
-    for i in range(step, len(arr), step):
+    step = 20
+    for i in range(step, len(arr)+step, step):
         converged, info = detector.test_converged(arr[:i])
         if converged:
             break

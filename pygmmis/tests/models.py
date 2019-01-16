@@ -98,9 +98,9 @@ if __name__ == '__main__':
 
     w = 0.1  # minimum covariance regularization, same units as data
     cutoff = 5  # segment the data set into neighborhood within 5 sigma around components
-    tol = 1e-4  # tolerance on logL to terminate EM
+    tol = 1e-6  # tolerance on logL to terminate EM
     oversampling = 500
-    maxiter = 100
+    maxiter = 200
 
     # run EM
     import logging
