@@ -8,6 +8,7 @@ from .convergence import ConvergenceDetector
 import logging
 logger = logging.getLogger("pygmmis")
 
+
 def createShared(a, dtype=ctypes.c_double):
     """Create a shared array to be used for multiprocessing's processes.
 
@@ -789,6 +790,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         bg_amp_ = background.amp
 
     log_Ls = []
+    check_frequency = 10
     while maxiter is None or it < maxiter: # limit loop in case of slow convergence
         log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
         log_Ls.append(log_L_)
@@ -804,23 +806,24 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         status_mess += "\t%.3f\t%d" % (log_L_, gmm.K - moved.size)
         logger.info(status_mess)
 
-        # convergence tests:
-        converged, info = detector.test_convergence(log_Ls)
-        if converged:
-            # with imputation or background fitting, observed logL can decrease
-            # allow some slack, but revert to previous model if it gets worse
-            if log_Ls[-1] < log_Ls[0] - detector.tolerance:
-                gmm.amp[:] = gmm_.amp[:]
-                gmm.mean[:,:] = gmm_.mean[:,:]
-                gmm.covar[:,:,:] = gmm_.covar[:,:,:]
-                if background is not None:
-                    background.amp = bg_amp_
-                logger.info("likelihood decreased: reverting to previous model")
-                break
-            elif moved.size == 0:
-                log_L = log_L_
-                logger.info("likelihood converged within tolerance %r: stopping here." % tol)
-                break
+        # with imputation or background fitting, observed logL can decrease
+        # allow some slack, but revert to previous model if it gets worse
+        if (not it % check_frequency) and it > 0:  # check every x steps
+            if np.any(log_Ls[1:]) > log_Ls[0] + tol:  # only start tracking once it is out of the initial local minimum
+                converged, info = detector.test_convergence(log_Ls)
+                if converged:
+                    if log_Ls[-1] < log_Ls[0] - detector.tolerance:
+                        gmm.amp[:] = gmm_.amp[:]
+                        gmm.mean[:,:] = gmm_.mean[:,:]
+                        gmm.covar[:,:,:] = gmm_.covar[:,:,:]
+                        if background is not None:
+                            background.amp = bg_amp_
+                        logger.info("likelihood decreased: reverting to previous model")
+                        break
+                    elif moved.size == 0:
+                        log_L = log_L_
+                        logger.info("likelihood converged within tolerance %r: stopping here." % tol)
+                        break
 
         # force update to U for all moved components
         if cutoff is not None:

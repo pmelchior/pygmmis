@@ -29,22 +29,11 @@ class ConvergenceDetector(object):
         self.burnin = burnin
 
 
-    def test_converged(self, backend):
+    def test_convergence(self, backend):
         n = len(backend)
         if n <= self.burnin:
             return False
 
-        # increasing = (self.backend[-1] - self.tolerance) > self.backend[-2]
-        # decreasing = (self.backend[-1] + self.tolerance) < self.backend[-2]
-        # higher_than_first = self.backend[-1] > (self.backend[self.burnin] + self.tolerance)
-
-        # if increasing:
-        #     self.burnin = len(self.backend)
-        #     logging.info("Gradient does not show convergence, keep going")
-        #     return False
-        # elif decreasing:
-        #     logging.info("LogL not increasing as it should. Bad start point? Waiting until it increases beyond the initial guess")
-        # else:
         (significant_gradient, big_gradient), (gradient, pvalue) = self._convergence_test(backend)
         info = (gradient, pvalue)
         if (not big_gradient) and significant_gradient:
@@ -56,10 +45,6 @@ class ConvergenceDetector(object):
         if significant_gradient and big_gradient:
             logging.debug("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
             self.burnin = len(backend)
-            # if gradient > 0:
-            #     self.burnin = len(backend)
-            # else:
-            #     logging.info("{}-{}: LogL not increasing as it should. Bad start point? Waiting until it increases beyond the initial guess".format(self.burnin, n))
         return False, info
 
 
@@ -118,7 +103,7 @@ if __name__ == '__main__':
 
     step = 20
     for i in range(step, len(arr)+step, step):
-        converged, info = detector.test_converged(arr[:i])
+        converged, info = detector.test_convergence(arr[:i])
         if converged:
             break
     plt.axvline(i)

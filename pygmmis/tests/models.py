@@ -90,24 +90,19 @@ if __name__ == '__main__':
         plot_ellipse(plt.gca(), model.mu[i], model.V[i], 'b')
 
 
-    import pygmmis
-    # more sophisticated option: use the covariance of the nearest neighbor.
-
+    from pygmmis import pygmmis
 
     gmm = pygmmis.GMM(K=ncomp, D=ndim)
 
     w = 0.1  # minimum covariance regularization, same units as data
     cutoff = 5  # segment the data set into neighborhood within 5 sigma around components
-    tol = 1e-6  # tolerance on logL to terminate EM
+    tol = 1e-5  # tolerance on logL to terminate EM
     oversampling = 500
     maxiter = 200
 
     # run EM
     import logging
     logging.basicConfig(format='%(message)s', level=logging.INFO)
-
-    # logL, U = pygmmis.fit(gmm, data, init_method='kmeans', w=w, cutoff=cutoff, tol=tol, rng=rng, maxiter=maxiter,
-    #                       split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)
 
     logL, U = pygmmis.fit(gmm, observed_data, init_method='kmeans', sel_callback=selection, w=w, cutoff=cutoff,
                           oversampling=oversampling, tol=tol, rng=rng, maxiter=1, split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)

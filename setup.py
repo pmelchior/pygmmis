@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name="pygmmis",
@@ -8,7 +8,7 @@ setup(
     author="Peter Melchior",
     author_email="peter.m.melchior@gmail.com",
     license='MIT',
-    py_modules=["pygmmis"],
+    py_modules=find_packages(),
     url="https://github.com/pmelchior/pygmmis",
     classifiers=[
         "Development Status :: 5 - Production/Stable",
