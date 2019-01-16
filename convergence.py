@@ -1,5 +1,5 @@
 from warnings import warn
-
+import logging
 import numpy as np
 from scipy.optimize import curve_fit, bisect
 from scipy.stats import norm
@@ -13,20 +13,6 @@ def fit_line(x, y, yerr=None):
     p, pcov = curve_fit(line, x, y, None, yerr, absolute_sigma=True)
     return p, pcov, np.sqrt(np.diag(pcov))
 
-# def _gradient_significance(dist, tol=0):
-#     """prob gradient within tolerance, prob of gradient > tol, prob gradient < tol"""
-#     return dist.cdf(tol) - dist.cdf(-tol), 1 - dist.cdf(tol), dist.cdf(-tol)
-
-def studentt_test(p, perr, tolerance, n):
-    """
-    Returns p value for a measured p +- perr with n measurements
-    """
-    T = studentT(n - 2)
-    upper_tstat = (p - tolerance) / perr #/ np.sqrt(n)
-    lower_tstat = (p + tolerance) / perr #/ np.sqrt(n)
-    upper_p = (1 - T.cdf(abs(upper_tstat)))
-    lower_p = (1 - T.cdf(abs(lower_tstat)))
-    return lower_p, upper_p
 
 def pvalue2sigma(pvalue):
     return norm(0, 1).ppf(1 - (pvalue/2))
@@ -34,65 +20,113 @@ def pvalue2sigma(pvalue):
 def sigma2pvalue(sigma):
     return norm(0, 1).cdf(sigma) * 2
 
-def gradient_significance(x, y, yerr):
-    p, pcov, perr = fit_line(x, y, yerr)
-    # pwithin, pabove, pbelow =_gradient_significance(dist, tolerance)
-    # return pwithin, pabove, pbelow, p[0]
-    return studentt_test(p[0], perr[0], len(x))
-
 
 class ConvergenceDetector(object):
-    def __init__(self, sigma=3, tolerance=0):
+    def __init__(self, tolerance, significance, burnin):
         self.tolerance = tolerance
-        self.sigma = sigma
-        self.p = norm(0, 1).cdf(sigma)
-
-    def gradient_significance(self, y, yerr):
-        x = np.arange(len(y))
-        return gradient_significance(x, y, yerr, self.tolerance)
-
-    def test_not_increasing(self, values, errors=0):
-        values, errors = np.atleast_1d(values, errors)
-        err = np.sqrt(errors[-1]**2 + errors[0]**2)
-        if ((values[-1] - values[0]) / err) > self.sigma:
-            return False, (None, None, None), 0, (values[-1] - values[0]) / len(values)
-
-        test_condition = (values[-1]) < (values[:-1])
-        try:
-            where = np.where(test_condition)[0][0]
-        except IndexError:
-            where = 0
-
-        within, above, below, m = self.gradient_significance(values[where:], errors[where:])
-        if (below > self.p):
-            warn("Significant downward trend detected")
-        converged = above < self.p
-        return converged, (within, above, below), where, m
+        self.significance = significance
+        self.pvalue = 1 - norm(0, 1).cdf(significance)
+        self.burnin = burnin
 
 
-    # def convergence_probability(self, values, errors=0, fractional_step=0.1):
-    #     vs = np.atleast_1d(values)
-    #     es = np.zeros_like(values)
-    #     es[:] = errors
-    #     step = int(len(vs) * fractional_step)
-    #     steps = range(step, len(vs), step)
-    #     return np.asarray([self.test_not_increasing(vs[s-step:s], es[s-step:s])[1][0] for s in steps])
+    def test_converged(self, backend):
+        n = len(backend)
+        if n <= self.burnin:
+            return False
+
+        # increasing = (self.backend[-1] - self.tolerance) > self.backend[-2]
+        # decreasing = (self.backend[-1] + self.tolerance) < self.backend[-2]
+        # higher_than_first = self.backend[-1] > (self.backend[self.burnin] + self.tolerance)
+
+        # if increasing:
+        #     self.burnin = len(self.backend)
+        #     logging.info("Gradient does not show convergence, keep going")
+        #     return False
+        # elif decreasing:
+        #     logging.info("LogL not increasing as it should. Bad start point? Waiting until it increases beyond the initial guess")
+        # else:
+        (significant_gradient, big_gradient), (gradient, pvalue) = self._convergence_test(backend)
+        info = (gradient, pvalue)
+        if (not big_gradient) and significant_gradient:
+            logging.info("{}-{}: Converged within {}".format(self.burnin, n, self.tolerance))
+            return True, info
+        if (not significant_gradient) and (not big_gradient):
+            logging.info("{}-{}: Gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
+            return True, info
+        if significant_gradient and big_gradient:
+            logging.info("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
+            if gradient > 0:
+                self.burnin = len(backend)
+            # else:
+            #     logging.info("{}-{}: LogL not increasing as it should. Bad start point? Waiting until it increases beyond the initial guess".format(self.burnin, n))
+        return False, info
+
+
+    def _convergence_test(self, backend):
+        """
+        :return: tuple: (converged, result_is_significant), (gradient, pvalue)
+        """
+        array = backend[self.burnin:]
+        n = len(array)
+        x = np.arange(len(array))
+        p, pcov, perr = fit_line(x, array)
+        gradient = p[0]
+        model = line(x, *p)
+        gradient_err = np.sqrt(np.sum((model - array)**2) / (n-2) / np.sum((x - x.mean())**2))
+
+        tstat = gradient / gradient_err
+        pvalue = (1 - studentT.cdf(abs(tstat), df=n-2)) * 2.  # two-sided t-test
+        significant_gradient = pvalue < self.pvalue
+        big_gradient = abs(gradient) > self.tolerance
+        return (significant_gradient, big_gradient), (gradient, pvalue)
+
+
+    # def estimate_critical_pvalue(self, nsteps, gradient, ):
+
+    #
+    #
+    # def find_burnin_point(self):
+    #     """
+    #     Returns the index at which the likelihood starts to monotonically increase (within a tolerance)
+    #     :return: int
+    #     """
+    #     try:
+    #         return np.where([self.backend[:] < self.backend[0]])[0][-1]  # find the last point which is smaller than index 0
+    #     except IndexError:
+    #         return 0
+
+
+
+
 
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
+    np.random.seed(11)
 
-    # arr = np.load('tests/loglike.npy')[80:]
-    arr = np.random.normal(0, 1, size=1000)
+    arr = np.load('tests/loglike.npy')
+    arr = np.concatenate([arr, np.random.normal(arr[-10:].mean(), arr[-10:].std(), size=200)])
+    # arr =
     x = np.arange(len(arr))
-    arr += (x*0.0001)
-    p, pcov, perr = fit_line(x, arr)
-
+    # arr += (x*1e-8)
     plt.plot(x, arr)
-    plt.plot(x, line(x, *p))
 
-    n = len(x)
-    tscore = p[0] / perr[0] #* np.sqrt(n)
-    pvalue = 1 - studentT.cdf(tscore, df=n-2)
-    sigma = pvalue2sigma(pvalue)
 
+    logging.basicConfig(format='%(message)s', level=logging.INFO)
+    detector = ConvergenceDetector(tolerance=1e-6, significance=3, burnin=0)
+
+    step = 5
+    for i in range(step, len(arr), step):
+        converged, info = detector.test_converged(arr[:i])
+        if converged:
+            break
+    plt.axvline(i)
+
+
+
+    #
+    # n = len(x)
+    # tscore = p[0] / perr[0] * np.sqrt(n)
+    # pvalue = 1 - studentT.cdf(tscore, df=n-2)
+    # sigma = pvalue2sigma(pvalue)
+    #
