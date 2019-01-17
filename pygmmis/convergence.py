@@ -32,16 +32,22 @@ class ConvergenceDetector(object):
     def test_convergence(self, backend):
         n = len(backend)
         if n <= self.burnin:
-            return False
-
+            return False, (None, None)
         (significant_gradient, big_gradient), (gradient, pvalue) = self._convergence_test(backend)
         info = (gradient, pvalue)
+
+        # better_than_initial = backend[-1] > backend[0] - self.tolerance
+        # if not better_than_initial:
+        #     logging.debug("{}-{}: Still decreasing from starting point")
+        #     return False, info
         if (not big_gradient) and significant_gradient:
+            logging.info("{}-{}: Gradient is significant but flat within {}".format(self.burnin, n, self.tolerance))
             logging.info("{}-{}: Converged within {}".format(self.burnin, n, self.tolerance))
             return True, info
         if (not significant_gradient) and (not big_gradient):
-            logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
-            return True, info
+            # logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
+            logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), continue".format(self.burnin, n, gradient, pvalue, self.pvalue))
+            return False, info
         if significant_gradient and big_gradient:
             logging.debug("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
             self.burnin = len(backend)
@@ -67,30 +73,12 @@ class ConvergenceDetector(object):
         return (significant_gradient, big_gradient), (gradient, pvalue)
 
 
-    # def estimate_critical_pvalue(self, nsteps, gradient, ):
-
-    #
-    #
-    # def find_burnin_point(self):
-    #     """
-    #     Returns the index at which the likelihood starts to monotonically increase (within a tolerance)
-    #     :return: int
-    #     """
-    #     try:
-    #         return np.where([self.backend[:] < self.backend[0]])[0][-1]  # find the last point which is smaller than index 0
-    #     except IndexError:
-    #         return 0
-
-
-
-
-
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     np.random.seed(11)
 
-    arr = np.load('tests/loglike.npy')
+    arr = np.load('pygmmis/tests/loglike.npy')
     arr = np.concatenate([arr, np.random.normal(arr[-10:].mean(), arr[-10:].std(), size=200)])
     # arr =
     x = np.arange(len(arr))
@@ -98,10 +86,10 @@ if __name__ == '__main__':
     plt.plot(x, arr)
 
 
-    logging.basicConfig(format='%(message)s', level=logging.INFO)
-    detector = ConvergenceDetector(tolerance=1e-6, significance=3, burnin=0)
+    logging.basicConfig(format='%(message)s', level=logging.DEBUG)
+    detector = ConvergenceDetector(tolerance=1e-5, significance=3, burnin=0)
 
-    step = 20
+    step = 5
     for i in range(step, len(arr)+step, step):
         converged, info = detector.test_convergence(arr[:i])
         if converged:

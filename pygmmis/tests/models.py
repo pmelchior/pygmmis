@@ -102,7 +102,7 @@ if __name__ == '__main__':
 
     # run EM
     import logging
-    logging.basicConfig(format='%(message)s', level=logging.INFO)
+    logging.basicConfig(format='%(message)s', level=logging.DEBUG)
 
     logL, U = pygmmis.fit(gmm, observed_data, init_method='kmeans', sel_callback=selection, w=w, cutoff=cutoff,
                           oversampling=oversampling, tol=tol, rng=rng, maxiter=1, split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)
