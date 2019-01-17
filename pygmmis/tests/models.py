@@ -6,6 +6,8 @@ from astroML.density_estimation import XDGMM
 import pytest
 from matplotlib.patches import Ellipse
 
+from pygmmis.pygmmis import initFromKMeans
+
 
 def no_selection(x):
     """x is an array of shape == (samples, dims)"""
@@ -56,13 +58,13 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     np.random.seed(seed)
 
-    ndim, ncomp = 2, 4
-    model, _ = gaussians_in_a_box(ndim, ncomp, 1, 5)
+    ndim, ncomp = 2, 3
+    model, _ = gaussians_in_a_box(ndim, ncomp, 0.75, 5)
 
-    # def selection(x):
-    #     return (x[:, 1] > -1.5) & (x[:, 1] < 2.5) & (x[:, 0] > 0.5) &  (x[:, 0] < 2.75)
     def selection(x):
-        return (x[:, 1] > -1.5) & (x[:, 1] < 2.) & (x[:, 0] > 0.) &  (x[:, 0] < 1.75)
+        return (x[:, 1] > -1.5) & (x[:, 1] < 2.5) & (x[:, 0] > 0.5) &  (x[:, 0] < 2.75)
+    # def selection(x):
+    #     return (x[:, 1] > -1.5) & (x[:, 1] < 2.) & (x[:, 0] > 0.) &  (x[:, 0] < 1.75)
 
 
     data = model.sample(5000)
@@ -91,24 +93,30 @@ if __name__ == '__main__':
     for i in range(model.n_components):
         plot_ellipse(plt.gca(), model.mu[i], model.V[i], 'b')
 
-
     from pygmmis import pygmmis
 
-    gmm = pygmmis.GMM(K=ncomp-1, D=ndim)
+    gmm = pygmmis.GMM(K=ncomp, D=ndim)
 
     w = 0.1  # minimum covariance regularization, same units as data
     cutoff = 5  # segment the data set into neighborhood within 5 sigma around components
     tol = 1e-5  # tolerance on logL to terminate EM
     oversampling = 10
-    maxiter = 500
+    maxiter = 1000
 
     # run EM
     import logging
-    logging.basicConfig(format='%(message)s', level=logging.DEBUG)
+    logging.basicConfig(format='%(message)s', level=logging.INFO)
 
-    logL, U = pygmmis.fit(gmm, observed_data, init_method='kmeans', sel_callback=selection, w=w, cutoff=cutoff,
-                          oversampling=oversampling, tol=tol, rng=rng, maxiter=1, split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)
+    initFromKMeans(gmm, observed_data)
 
+    for i in range(gmm.K):
+        plot_ellipse(plt.gca(), gmm.mean[i], gmm.covar[i], 'r')
+
+    plt.figure()
+    plt.scatter(*unobserved_data.T, c='r', s=1)
+    plt.scatter(*observed_data.T, c='g', s=1)
+    for i in range(model.n_components):
+        plot_ellipse(plt.gca(), model.mu[i], model.V[i], 'b')
     for i in range(gmm.K):
         plot_ellipse(plt.gca(), gmm.mean[i], gmm.covar[i], 'r')
 
@@ -118,7 +126,7 @@ if __name__ == '__main__':
 
     logL, U = pygmmis.fit(gmm, observed_data, init_method='none', sel_callback=selection, w=w, cutoff=cutoff,
                           oversampling=oversampling, tol=tol, rng=rng, maxiter=maxiter, backend=backend,
-                          split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)
+                          split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2, min_occupation=0.01, verbose=False)
 
     for i in range(gmm.K):
         plot_ellipse(plt.gca(), gmm.mean[i], gmm.covar[i], 'k')

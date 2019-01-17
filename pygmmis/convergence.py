@@ -44,7 +44,7 @@ class ConvergenceDetector(object):
         #     return False, info
         if (not big_gradient) and significant_gradient:
             if not self.last_check:
-                logging.info("{}-{}: Gradient is significant but flat within {}".format(self.burnin, n, self.tolerance))
+                logging.info("{}-{}: Gradient is significant but flat within {}, double checking".format(self.burnin, n, self.tolerance))
                 self.last_check = True
                 return False, (mu, std), info
             else:
