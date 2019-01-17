@@ -1,9 +1,10 @@
-from warnings import warn
 import logging
+
 import numpy as np
-from scipy.optimize import curve_fit, bisect
+from scipy.optimize import curve_fit
 from scipy.stats import norm
 from scipy.stats import t as studentT
+
 
 def line(x, m, c):
     return (m*x) + c
@@ -18,22 +19,23 @@ def pvalue2sigma(pvalue):
     return norm(0, 1).ppf(1 - (pvalue/2))
 
 def sigma2pvalue(sigma):
-    return norm(0, 1).cdf(sigma) * 2
+    return norm(0, 1).cdf(-abs(sigma)) * 2
 
 
 class ConvergenceDetector(object):
     def __init__(self, tolerance, significance, burnin):
         self.tolerance = tolerance
         self.significance = significance
-        self.pvalue = 1 - norm(0, 1).cdf(significance)
+        self.pvalue = sigma2pvalue(significance)
         self.burnin = burnin
+        self.last_check = False
 
 
     def test_convergence(self, backend):
         n = len(backend)
         if n <= self.burnin:
             return False, (None, None)
-        (significant_gradient, big_gradient), (gradient, pvalue) = self._convergence_test(backend)
+        (significant_gradient, big_gradient), (gradient, pvalue), (mu, std) = self._convergence_test(backend)
         info = (gradient, pvalue)
 
         # better_than_initial = backend[-1] > backend[0] - self.tolerance
@@ -44,14 +46,20 @@ class ConvergenceDetector(object):
             logging.info("{}-{}: Gradient is significant but flat within {}".format(self.burnin, n, self.tolerance))
             logging.info("{}-{}: Converged within {}".format(self.burnin, n, self.tolerance))
             return True, info
-        if (not significant_gradient) and (not big_gradient):
-            # logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
-            logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), continue".format(self.burnin, n, gradient, pvalue, self.pvalue))
-            return False, info
+        if (not significant_gradient):
+            if not self.last_check:
+                logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), probably converged, double checking".format(self.burnin, n, gradient, pvalue, self.pvalue))
+                self.last_check = True
+                return False, info
+            else:
+                logging.debug( "{}-{}: Double checked, gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
+                return True, info
+
         if significant_gradient and big_gradient:
             logging.debug("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
             self.burnin = len(backend)
-        return False, info
+            self.last_check = False
+            return False, info
 
 
     def _convergence_test(self, backend):
@@ -70,7 +78,7 @@ class ConvergenceDetector(object):
         pvalue = (1 - studentT.cdf(abs(tstat), df=n-2)) * 2.  # two-sided t-test
         significant_gradient = pvalue < self.pvalue
         big_gradient = abs(gradient) > self.tolerance
-        return (significant_gradient, big_gradient), (gradient, pvalue)
+        return (significant_gradient, big_gradient), (gradient, pvalue), (np.mean(array - model), np.std(array - model))
 
 
 
@@ -78,29 +86,24 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     np.random.seed(11)
 
-    arr = np.load('pygmmis/tests/loglike.npy')
+    arr = np.load('tests/loglike.npy')
     arr = np.concatenate([arr, np.random.normal(arr[-10:].mean(), arr[-10:].std(), size=200)])
-    # arr =
+    # arr = np.random.normal(-13.4, 2, size=200)
     x = np.arange(len(arr))
-    # arr += (x*1e-8)
     plt.plot(x, arr)
 
-
     logging.basicConfig(format='%(message)s', level=logging.DEBUG)
-    detector = ConvergenceDetector(tolerance=1e-5, significance=3, burnin=0)
 
-    step = 5
+    detector = ConvergenceDetector(tolerance=0, significance=1, burnin=0)
+
+    # will detect "convergence" in a normal dist when significance~0.29
+    # noise of std=1, requires same significance to detect
+
+
+    step = 10
     for i in range(step, len(arr)+step, step):
         converged, info = detector.test_convergence(arr[:i])
         if converged:
             break
     plt.axvline(i)
 
-
-
-    #
-    # n = len(x)
-    # tscore = p[0] / perr[0] * np.sqrt(n)
-    # pvalue = 1 - studentT.cdf(tscore, df=n-2)
-    # sigma = pvalue2sigma(pvalue)
-    #
