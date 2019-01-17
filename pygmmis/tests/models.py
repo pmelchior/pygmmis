@@ -56,11 +56,13 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     np.random.seed(seed)
 
-    ndim, ncomp = 2, 3
-    model, _ = gaussians_in_a_box(ndim, ncomp, 0.75, 5)
+    ndim, ncomp = 2, 4
+    model, _ = gaussians_in_a_box(ndim, ncomp, 1, 5)
 
+    # def selection(x):
+    #     return (x[:, 1] > -1.5) & (x[:, 1] < 2.5) & (x[:, 0] > 0.5) &  (x[:, 0] < 2.75)
     def selection(x):
-        return (x[:, 1] > -1.5) & (x[:, 1] < 2.5) & (x[:, 0] > 0.5) &  (x[:, 0] < 2.75)
+        return (x[:, 1] > -1.5) & (x[:, 1] < 2.) & (x[:, 0] > 0.) &  (x[:, 0] < 1.75)
 
 
     data = model.sample(5000)
@@ -92,13 +94,13 @@ if __name__ == '__main__':
 
     from pygmmis import pygmmis
 
-    gmm = pygmmis.GMM(K=ncomp, D=ndim)
+    gmm = pygmmis.GMM(K=ncomp-1, D=ndim)
 
     w = 0.1  # minimum covariance regularization, same units as data
     cutoff = 5  # segment the data set into neighborhood within 5 sigma around components
     tol = 1e-5  # tolerance on logL to terminate EM
-    oversampling = 500
-    maxiter = 200
+    oversampling = 10
+    maxiter = 500
 
     # run EM
     import logging

@@ -536,7 +536,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
 
 
 def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10,
-        covar_callback=None, background=None, tol=1e-3, maxiter=None, burnin=0, frozen=None, split_n_merge=False,
+        covar_callback=None, background=None, tol=1e-3, maxiter=None, burnin=0, min_amp=0, frozen=None, split_n_merge=False,
         rng=np.random, backend=None):
     """Fit GMM to data.
 
@@ -671,10 +671,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     if backend is not None:
         backend.setup(maxiter, mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
     try:
-        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
+        log_L, log_L_std, N, N2, occupation = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
                            oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool,
                            chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable,
-                           maxiter=maxiter, burnin=burnin, tol=tol, rng=rng, backend=backend)
+                           maxiter=maxiter, burnin=burnin, min_amp=min_amp, tol=tol, rng=rng, backend=backend)
     except Exception:
         # cleanup
         pool.close()
@@ -719,27 +719,36 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             # Effectively, partial runs are as expensive as full runs.
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
+            log_L_, log_L_std_, N_, N2_, occupation_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
                                   oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
-                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, tol=tol, prefix="SNM_P",
+                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, min_amp=min_amp, tol=tol, prefix="SNM_P",
                                   changeable=changeable, rng=rng, backend=backend)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
+            log_L_, log_L_std_, N_, N2_, occupation_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback,
                                   oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
-                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, tol=tol, prefix="SNM_F",
+                                  cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, min_amp=min_amp, tol=tol, prefix="SNM_F",
                                   changeable=changeable, rng=rng, backend=backend)
-
-            if log_L >= log_L_:
+            if log_L - log_L_std >= log_L_ + log_L_std_:
                 # revert to backup
                 gmm.amp[:] = gmm_.amp[:]
                 gmm.mean[:] = gmm_.mean[:,:]
                 gmm.covar[:,:,:] = gmm_.covar[:,:,:]
                 U = U_
-                logger.info ("split'n'merge likelihood decreased: reverting to previous model")
+                logger.info("split'n'merge likelihood decreased: reverting to previous model")
                 if backend is not None:
                     backend.switch_chain('master')
                 break
+            elif log_L_ - log_L_std_ >= log_L + log_L_std:
+                # keep this one
+                logger.info("split'n'merge likelihood increased: keeping current model")
+            else:
+                # no real difference, choose the one whose components are most observed
+                if occupation_.sum() - occupation.sum() > 0:
+                    # keep this one
+                    logger.info("split'n'merge likelihood not any different: keeping current more observed model")
+                else:
+                    logger.info("split'n'merge likelihood not any different: reverting to more observed model")
 
             log_L = log_L_
             split_n_merge -= 1
@@ -751,10 +760,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
 
 # run EM sequence
 def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None,
-        background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, burnin=0, tol=1e-3, prefix="", changeable=None,
+        background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, burnin=0, min_amp=0, tol=1e-3, prefix="", changeable=None,
         rng=np.random, backend=None):
 
-    detector = ConvergenceDetector(tolerance=tol, significance=3, burnin=burnin)
+    detector = ConvergenceDetector(tolerance=tol, significance=1, burnin=burnin)
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -792,7 +801,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     log_Ls = []
     check_frequency = 10
     while maxiter is None or it < maxiter: # limit loop in case of slow convergence
-        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+        log_L_, N, N2, N0, occupation = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
         log_Ls.append(log_L_)
 
         # check if component has moved by more than sigma/2
@@ -810,9 +819,17 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         # allow some slack, but revert to previous model if it gets worse
 
         if (not it % check_frequency) and it > 0:  # check every x steps
-            converged, info = detector.test_convergence(log_Ls)
+            if np.any(gmm.amp < min_amp):
+                logger.info("minimum amplitude reached: reverting to previous model")
+                gmm.amp[:] = gmm_.amp[:]
+                gmm.mean[:, :] = gmm_.mean[:, :]
+                gmm.covar[:, :, :] = gmm_.covar[:, :, :]
+                if background is not None:
+                    background.amp = bg_amp_
+                break
+            converged, (log_L_mean, log_L_std), info = detector.test_convergence(log_Ls)
             if converged:
-                if log_Ls[-1] < log_Ls[0] - detector.tolerance:
+                if log_L_mean < log_Ls[0] - detector.tolerance:
                     gmm.amp[:] = gmm_.amp[:]
                     gmm.mean[:,:] = gmm_.mean[:,:]
                     gmm.covar[:,:,:] = gmm_.covar[:,:,:]
@@ -847,8 +864,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
 
         if backend is not None:
             backend.save(mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=log_L)
-
-    return log_L, N, N2
+    log_L, log_L_err = detector.test_convergence(log_Ls)[1]
+    # log_L += log_negative_binomial(observed=N, total=N+N2, selection_prob=)
+    # TODO add in P(n|N) and fit for N
+    return log_L, log_L_err, N, N2, occupation
 
 # run one EM step
 def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
@@ -860,7 +879,6 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, R=R, p_bg=p_bg, pool=pool, chunksize=chunksize)
 
     A2 = M2 = C2 = B2 = H2 = N2 = 0
-
     # here the magic happens: imputation from the current model
     if sel_callback is not None:
 
@@ -904,9 +922,10 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
             if sel_outside.any():
                 logger.debug("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
+
     _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
 
-    return log_L, N, N2, N0
+    return log_L, N, N2, N0, A/(A+A2)
 
 # perform E step calculations.
 # If cutoff is set, this will also set the neighborhoods U
