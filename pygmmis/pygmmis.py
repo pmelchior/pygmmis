@@ -671,7 +671,12 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
 
     if backend is not None:
-        backend.setup(maxiter, mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
+        if not len(backend):
+            backend.setup(maxiter, mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
+            logging.info("Staring recording on the '{}' backend".format(backend))
+        else:
+            logging.info("Resuming recording on the '{}' backend".format(backend))
+            backend.grow(maxiter)
     try:
         log_L, log_L_std, N, N2, occupation = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
                                                   oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool,
@@ -701,8 +706,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             U_ = [U[k].copy() for k in xrange(gmm.K)]
 
             changing, cleanup = _findSNMComponents(gmm, U, log_p, log_S, N+N2, pool=pool, chunksize=chunksize)
-            if backend is not None:
-                backend.new_chain(maxiter)
             logger.info("merging %d and %d, splitting %d" % tuple(changing))
 
             # modify components
@@ -719,7 +722,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             # components, otherwise the contribution of the changeable ones to the mixture
             # would be over-estimated.
             # Effectively, partial runs are as expensive as full runs.
-
+            if backend is not None:
+                previous = backend.current_name
+                branch_name = "M=({},{})|S=({})".format(*changing)
+                backend.branch_chain(maxiter*2, branch_name)
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
             log_L_, log_L_std_, N_, N2_, occupation_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
                                                            oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
@@ -739,18 +745,13 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
                 U = U_
                 logger.info("split'n'merge likelihood decreased: reverting to previous model")
                 if backend is not None:
-                    backend.switch_chain('master')
+                    backend.switch_chain(previous)
                 break
             elif log_L_ - log_L_std_ >= log_L + log_L_std:
-                # keep this one
-                logger.info("split'n'merge likelihood increased: keeping current model")
+                logger.info("split'n'merge likelihood increased: keep going")
             else:
-                # no real difference, choose the one whose components are most observed
-                if occupation_.sum() - occupation.sum() > 0:
-                    # keep this one
-                    logger.info("split'n'merge likelihood not any different: keeping current more observed model")
-                else:
-                    logger.info("split'n'merge likelihood not any different: reverting to more observed model")
+                # no real difference
+                logger.info("split'n'merge likelihood didn't really change: keep going")
 
             log_L = log_L_
             split_n_merge -= 1
@@ -758,6 +759,9 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     pool.close()
     pool.join()
     del data_, covar_, log_S
+    if backend is not None:
+        if backend.current_name != 'master':
+            backend.merge_chain('master')
     return log_L, U
 
 # run EM sequence

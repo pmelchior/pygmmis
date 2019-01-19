@@ -52,11 +52,11 @@ class ConvergenceDetector(object):
                 return True, mu_std, info
         if (not significant_gradient):
             if not self.last_check:
-                logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), probably converged, double checking".format(self.burnin, n, gradient, pvalue, self.pvalue))
+                logging.info("{}-{}: Gradient {} is not significant (p={} >= {}), probably converged, double checking".format(self.burnin, n, gradient, pvalue, self.pvalue))
                 self.last_check = True
                 return False, mu_std, info
             else:
-                logging.debug( "{}-{}: Double checked, gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
+                logging.info( "{}-{}: Double checked, gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
                 return True, mu_std, info
 
         if significant_gradient and big_gradient:

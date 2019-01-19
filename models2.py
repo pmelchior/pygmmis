@@ -6,6 +6,8 @@ from astroML.density_estimation import XDGMM
 import pytest
 from matplotlib.patches import Ellipse
 
+from pygmmis.visual import GMMTracker
+
 
 def no_selection(x):
     """x is an array of shape == (samples, dims)"""
@@ -56,7 +58,7 @@ if __name__ == '__main__':
     rng = RandomState(seed)
     np.random.seed(seed)
 
-    ndim, ncomp = 2, 3
+    ndim, ncomp = 2, 4
     model, _ = gaussians_in_a_box(ndim, ncomp, 0.75, 5)
 
     def selection(x):
@@ -66,44 +68,7 @@ if __name__ == '__main__':
     data = model.sample(5000)
     observed_data = data[selection(data)]
 
-
-    plt.scatter(*data.T, c='k', s=1)
-    plt.scatter(*observed_data.T, c='g', s=1)
-
-    def plot_ellipse(ax, mu, covariance, color, linewidth=2, alpha=0.5):
-        var, U = np.linalg.eig(covariance)
-        angle = 180. / np.pi * np.arccos(np.abs(U[0, 0]))
-        e = Ellipse(mu, 2 * np.sqrt(5.991 * var[0]),
-                    2 * np.sqrt(5.991 * var[1]),
-                    angle=angle)
-        e.set_alpha(alpha)
-        e.set_linewidth(linewidth)
-        e.set_edgecolor(color)
-        e.set_facecolor(color)
-        e.set_fill(False)
-        ax.add_artist(e)
-
-        return e
-
-    for i in range(model.n_components):
-        plot_ellipse(plt.gca(), model.mu[i], model.V[i], 'b')
-
-
     from pygmmis import pygmmis
-    # more sophisticated option: use the covariance of the nearest neighbor.
-    def covar_tree_cb(coords, tree, covar):
-        """Return the covariance of the nearest neighbor of coords in data."""
-        dist, ind = tree.query(coords, k=1)
-        return covar[ind.flatten()]
-
-
-    from sklearn.neighbors import KDTree
-    covar = np.asarray([np.eye(ndim) for _ in data]) * 0.01
-    tree = KDTree(data, leaf_size=100)
-    covar = pygmmis.createShared(covar)
-    covar_cb = partial(covar_tree_cb, tree=tree, covar=covar)
-
-
 
     gmm = pygmmis.GMM(K=ncomp, D=ndim)
 
@@ -111,24 +76,25 @@ if __name__ == '__main__':
     cutoff = 50  # segment the data set into neighborhood within 5 sigma around components
     tol = 1e-6  # tolerance on logL to terminate EM
     oversampling = 10
-    maxiter = 300
+    maxiter = 1000
 
     # run EM
     import logging
     logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 
+
     logL, U = pygmmis.fit(gmm, data, init_method='kmeans', w=w, cutoff=cutoff, tol=tol, rng=rng, maxiter=1,
                           split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)
 
-    for i in range(model.n_components):
-        plot_ellipse(plt.gca(), gmm.mean.copy()[i], gmm.covar.copy()[i], 'r')
 
+    from pygmmis.backend import Backend
+    backend = Backend('backend')
 
     logL, U = pygmmis.fit(gmm, observed_data, init_method='none', sel_callback=selection, w=w, cutoff=cutoff, oversampling=oversampling,
-                          tol=tol, rng=rng, maxiter=maxiter, split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2)
+                          tol=tol, rng=rng, maxiter=maxiter, # split_n_merge=gmm.K * (gmm.K - 1) * (gmm.K - 2) / 2,
+                          backend=backend)
 
-
-    for i in range(gmm.K):
-        plot_ellipse(plt.gca(), gmm.mean[i], gmm.covar[i], 'k')
-
+    plt.plot(backend.master.get_values('log_L'))
+    tracker = GMMTracker(backend, observed_data)
+    tracker.plot_trace(step=100)
