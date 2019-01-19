@@ -823,29 +823,29 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         # with imputation or background fitting, observed logL can decrease
         # allow some slack, but revert to previous model if it gets worse
 
-        # if (not it % check_frequency) and it > 0:  # check every x steps
-        #     if np.any(occupation < min_occupation):
-        #         logger.info("minimum allowed occupation reached: reverting to previous model")
-        #         gmm.amp[:] = gmm_.amp[:]
-        #         gmm.mean[:, :] = gmm_.mean[:, :]
-        #         gmm.covar[:, :, :] = gmm_.covar[:, :, :]
-        #         if background is not None:
-        #             background.amp = bg_amp_
-        #         break
-        #     converged, (log_L_mean, log_L_std), (gradient, pvalue) = detector.test_convergence(log_Ls)
-        #     if converged:
-        #         if log_L_mean < log_Ls[0] - detector.tolerance:
-        #             gmm.amp[:] = gmm_.amp[:]
-        #             gmm.mean[:,:] = gmm_.mean[:,:]
-        #             gmm.covar[:,:,:] = gmm_.covar[:,:,:]
-        #             if background is not None:
-        #                 background.amp = bg_amp_
-        #             logger.info("likelihood decreased: reverting to previous model")
-        #             break
-        #         elif moved.size == 0:
-        #             log_L = log_L_
-        #             logger.info("likelihood converged within tolerance %r: stopping here." % tol)
-        #             break
+        if (not it % check_frequency) and it > 0:  # check every x steps
+            if np.any(occupation < min_occupation):
+                logger.info("minimum allowed occupation reached: reverting to previous model")
+                gmm.amp[:] = gmm_.amp[:]
+                gmm.mean[:, :] = gmm_.mean[:, :]
+                gmm.covar[:, :, :] = gmm_.covar[:, :, :]
+                if background is not None:
+                    background.amp = bg_amp_
+                break
+            converged, (log_L_mean, log_L_std), (gradient, pvalue) = detector.test_convergence(log_Ls)
+            if converged:
+                if log_L_mean < log_Ls[0] - detector.tolerance:
+                    gmm.amp[:] = gmm_.amp[:]
+                    gmm.mean[:,:] = gmm_.mean[:,:]
+                    gmm.covar[:,:,:] = gmm_.covar[:,:,:]
+                    if background is not None:
+                        background.amp = bg_amp_
+                    logger.info("likelihood decreased: reverting to previous model")
+                    break
+                elif moved.size == 0:
+                    log_L = log_L_
+                    logger.info("likelihood converged within tolerance %r: stopping here." % tol)
+                    break
 
         # force update to U for all moved components
         if cutoff is not None:

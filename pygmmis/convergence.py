@@ -34,10 +34,10 @@ class ConvergenceDetector(object):
     def test_convergence(self, backend):
         n = len(backend)
         if n <= self.burnin:
-            return False, (None, None)
-        (significant_gradient, big_gradient), (gradient, pvalue), (mu, std) = self._convergence_test(backend)
-        info = (gradient, pvalue)
-
+            return False, (np.mean(backend), np.std(backend)), (None, None)
+        (significant_gradient, big_gradient), mu_std, info = self._convergence_test(backend)
+        gradient, pvalue = info
+        mu, std = mu_std
         # better_than_initial = backend[-1] > backend[0] - self.tolerance
         # if not better_than_initial:
         #     logging.debug("{}-{}: Still decreasing from starting point")
@@ -46,24 +46,24 @@ class ConvergenceDetector(object):
             if not self.last_check:
                 logging.info("{}-{}: Gradient is significant but flat within {}, double checking".format(self.burnin, n, self.tolerance))
                 self.last_check = True
-                return False, (mu, std), info
+                return False, mu_std, info
             else:
                 logging.info("{}-{}: Converged within {}".format(self.burnin, n, self.tolerance))
-                return True, (mu, std), info
+                return True, mu_std, info
         if (not significant_gradient):
             if not self.last_check:
                 logging.debug("{}-{}: Gradient {} is not significant (p={} >= {}), probably converged, double checking".format(self.burnin, n, gradient, pvalue, self.pvalue))
                 self.last_check = True
-                return False, (mu, std), info
+                return False, mu_std, info
             else:
                 logging.debug( "{}-{}: Double checked, gradient {} is not significant (p={} >= {}), converged".format(self.burnin, n, gradient, pvalue, self.pvalue))
-                return True, (mu, std), info
+                return True, mu_std, info
 
         if significant_gradient and big_gradient:
             logging.debug("{}-{}: Gradient {} is significant (p={}) and not flat, keep going".format(self.burnin, n, gradient, pvalue))
             self.burnin = len(backend)
             self.last_check = False
-            return False, (mu, std), info
+            return False, mu_std, info
 
 
     def _convergence_test(self, backend):
@@ -82,7 +82,7 @@ class ConvergenceDetector(object):
         pvalue = (1 - studentT.cdf(abs(tstat), df=n-2)) * 2.  # two-sided t-test
         significant_gradient = pvalue < self.pvalue
         big_gradient = abs(gradient) > self.tolerance
-        return (significant_gradient, big_gradient), (gradient, pvalue), (np.mean(array - model), np.std(array - model))
+        return (significant_gradient, big_gradient), (np.mean(array), np.std(array)), (gradient, pvalue)
 
 
 
