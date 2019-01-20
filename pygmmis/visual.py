@@ -65,7 +65,7 @@ class GMMTracker(object):
             c = plot_centre(ax, self.backend.mu[n][i], color)
             self.artists.append(e)
             self.artists.append(c)
-            if n < len(self.backend.mu)-1:
+            if n < len(self.backend)-1:
                 direction = plot_direction(ax, self.backend.mu[n][i], self.backend.mu[n+1][i], color=color, label='EMstep')
                 self.artists.append(direction)
 
@@ -97,6 +97,8 @@ class GMMTracker(object):
         self.clear()
         if stop < 0:
             stop += len(self)
+        if start < 0:
+            start += len(self)
         cmap = matplotlib.cm.get_cmap('viridis')
         from matplotlib.colors import Normalize
         mappable = matplotlib.cm.ScalarMappable(norm=Normalize(0, stop), cmap=cmap)

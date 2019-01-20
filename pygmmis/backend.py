@@ -78,7 +78,7 @@ class BackendBase(object):
         return "<XDGMM Backend - {} iterations ({})>".format(self.iteration, self.varnames)
 
     def __getattr__(self, item):
-        return self.arrays[item]
+        return self.arrays[item][:self.iteration]
 
 Event = namedtuple('Event', ['event', 'origin', 'origin_iteration', 'into', 'into_iteration'])
 

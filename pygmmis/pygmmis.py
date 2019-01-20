@@ -671,12 +671,13 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
 
     if backend is not None:
+        len_backend = maxiter or 50
         if not len(backend):
-            backend.setup(maxiter, mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
+            backend.setup(len_backend, mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
             logging.info("Staring recording on the '{}' backend".format(backend))
         else:
             logging.info("Resuming recording on the '{}' backend".format(backend))
-            backend.grow(maxiter)
+            backend.grow(len_backend)
     try:
         log_L, log_L_std, N, N2, occupation = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
                                                   oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool,
@@ -725,7 +726,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             if backend is not None:
                 previous = backend.current_name
                 branch_name = "M=({},{})|S=({})".format(*changing)
-                backend.branch_chain(maxiter*2, branch_name)
+                backend.branch_chain(len_backend*2, branch_name)
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
             log_L_, log_L_std_, N_, N2_, occupation_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
                                                            oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
