@@ -537,7 +537,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10,
+def fit(gmm, data, covar=None, R=None, init_method='random', w=0., eta=0, cutoff=None, sel_callback=None, oversampling=10,
         covar_callback=None, background=None, tol=1e-3, maxiter=None, burnin=0, min_occupation=0, frozen=None, split_n_merge=False,
         rng=np.random, backend=None, verbose=False):
     """Fit GMM to data.
@@ -582,6 +582,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     """
 
     N = len(data)
+    m = data.mean(axis=0)
     # if there are data (features) missing, i.e. masked as np.nan, set them to zeros
     # and create/set covariance elements to very large value to reduce its weight
     # to effectively zero
@@ -678,9 +679,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         else:
             logging.info("Resuming recording on the '{}' backend".format(backend))
             backend.grow(len_backend)
+        backend.save(mu=gmm.mean, V=gmm.covar, alpha=gmm.amp, log_L=-np.inf)
     try:
         log_L, log_L_std, N, N2, occupation = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
-                                                  oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool,
+                                                  oversampling=oversampling, covar_callback=covar_callback, w=w, eta=eta, m=m, pool=pool,
                                                   chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable,
                                                   maxiter=maxiter, burnin=burnin, min_occupation=min_occupation, tol=tol, rng=rng, backend=backend, verbose=verbose)
     except Exception:
@@ -729,13 +731,13 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
                 backend.branch_chain(len_backend*2, branch_name)
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
             log_L_, log_L_std_, N_, N2_, occupation_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
-                                                           oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
+                                                           oversampling=oversampling, covar_callback=covar_callback, w=w, eta=eta, m=m,  pool=pool, chunksize=chunksize,
                                                            cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, min_occupation=min_occupation, tol=tol, prefix="SNM_P",
                                                            changeable=changeable, rng=rng, backend=backend, verbose=verbose)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
             log_L_, log_L_std_, N_, N2_, occupation_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback,
-                                                           oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize,
+                                                           oversampling=oversampling, covar_callback=covar_callback, w=w, eta=eta, m=m,  pool=pool, chunksize=chunksize,
                                                            cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, burnin=burnin, min_occupation=min_occupation, tol=tol, prefix="SNM_F",
                                                            changeable=changeable, rng=rng, backend=backend, verbose=verbose)
             if log_L - log_L_std >= log_L_ + log_L_std_:
@@ -767,7 +769,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
 
 # run EM sequence
 def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None,
-        background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, burnin=0, min_occupation=0, tol=1e-3,
+        background=None, p_bg=None, w=0, eta=0, m=None, pool=None, chunksize=1, cutoff=None, maxiter=None, burnin=0, min_occupation=0, tol=1e-3,
         prefix="", changeable=None, rng=np.random, backend=None, verbose=False):
 
     detector = ConvergenceDetector(tolerance=tol, significance=1, burnin=burnin)
@@ -811,7 +813,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     gradient = 0.
     occupation = np.ones(gmm.K)
     while maxiter is None or it < maxiter: # limit loop in case of slow convergence
-        log_L_, N, N2, N0, occupation = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+        log_L_, N, N2, N0, occupation = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,
+                                                sel_callback=sel_callback, oversampling=oversampling,
+                                                covar_callback=covar_callback, background=background, p_bg=p_bg ,
+                                                w=w, eta=eta, m=m, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol,
+                                                changeable=changeable, it=it, rng=rng)
         log_Ls.append(log_L_)
 
         # check if component has moved by more than sigma/2
@@ -886,7 +892,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     return log_L, log_L_err, N, N2, occupation
 
 # run one EM step
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, oversampling=10,
+            covar_callback=None, background=None, p_bg=None, w=0, eta=0, m=None, pool=None, chunksize=1, cutoff=None, tol=1e-3,
+            changeable=None, it=0, rng=np.random):
 
     # NOTE: T_inv (in fact (T_ik)^-1 for all samples i and components k)
     # is very large and is unfortunately duplicated in the parallelized _Mstep.
@@ -939,7 +947,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
                 logger.debug("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
 
-    _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
+    _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, eta, m, changeable=changeable, background=background)
 
     return log_L, N, N2, N0, A/(A+A2)
 
@@ -1126,7 +1134,7 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, R, log_S):
 
 # update component with the moment matrices.
 # If changeable is set, update only those components and renormalize the amplitudes
-def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, background=None):
+def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, eta=0, m=None, changeable=None, background=None):
 
     # recompute background amplitude
     if background is not None and background.adjust_amp:
@@ -1145,7 +1153,14 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
         gmm.amp[changeable['amp']] = (A + A2)[changeable['amp']] / (A + A2)[changeable['amp']].sum() * (total - (gmm.amp[~changeable['amp']]).sum())
 
     # mean updateL
-    gmm.mean[changeable['mean'],:] = (M + M2)[changeable['mean'],:]/(A + A2)[changeable['mean'],None]
+    if eta == 0:
+        gmm.mean[changeable['mean'],:] = (M + M2)[changeable['mean'],:]/(A + A2)[changeable['mean'],None]
+        V_correction = 0
+    else:
+        diff = gmm.mean - m
+        V_correction = (diff[:, None] * diff[:, :, None] * eta)
+        m_correction = eta * m
+        gmm.mean[changeable['mean'], :] = (M + M2 + m_correction)[changeable['mean'], :] / ((A + A2)[changeable['mean'], None] + eta)
 
     # covar updateL
     # minimum covariance term?
@@ -1156,9 +1171,10 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
         # prefactor 1 / (q_j + 1) = 1 / (A + 1) in our terminology
         # On average, q_j = N/K, so we'll adopt that to correct.
         w_eff = w**2 * ((N+N2)/gmm.K + 1)
-        gmm.covar[changeable['covar'],:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:])[changeable['covar'],:,:] / (A + A2 + 1)[changeable['covar'],None,None]
+        gmm.covar[changeable['covar'],:,:] = (C + C2 + w_eff*np.eye(gmm.D)[None,:,:] + V_correction)[changeable['covar'],:,:] / (A + A2 + 1)[changeable['covar'],None,None]
     else:
-        gmm.covar[changeable['covar'],:,:] = (C + C2)[changeable['covar'],:,:] / (A + A2)[changeable['covar'],None,None]
+        gmm.covar[changeable['covar'],:,:] = (C + C2 + V_correction)[changeable['covar'],:,:] / (A + A2)[changeable['covar'],None,None]
+
 
 # draw from the model (+ background) and apply appropriate covariances
 def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
