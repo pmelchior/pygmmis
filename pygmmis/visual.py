@@ -61,13 +61,15 @@ class GMMTracker(object):
         if self.axes is None:
             self.figure()
         for i, ax in enumerate(self.axes):
-            e = plot_ellipse(ax, self.backend.mu[n][i], self.backend.V[n][i], color)
-            c = plot_centre(ax, self.backend.mu[n][i], color)
-            self.artists.append(e)
-            self.artists.append(c)
-            if n < len(self.backend)-1:
+            try:
+                e = plot_ellipse(ax, self.backend.mu[n][i], self.backend.V[n][i], color)
+                c = plot_centre(ax, self.backend.mu[n][i], color)
+                self.artists.append(e)
+                self.artists.append(c)
                 direction = plot_direction(ax, self.backend.mu[n][i], self.backend.mu[n+1][i], color=color, label='EMstep')
                 self.artists.append(direction)
+            except IndexError:
+                pass
 
 
     def clear(self):

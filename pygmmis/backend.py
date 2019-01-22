@@ -27,9 +27,10 @@ class BackendBase(object):
     def grow(self, length):
         space_left = self._length - self.iteration
         space_needed = length - space_left
-        for k, array in self.arrays.items():
-            self.arrays[k] = np.append(array, np.zeros((space_needed,) + array.shape[1:], dtype=array.dtype), axis=0)
-        self._length += space_needed
+        if space_needed > 0:
+            for k, array in self.arrays.items():
+                self.arrays[k] = np.append(array, np.zeros((space_needed,) + array.shape[1:], dtype=array.dtype), axis=0)
+            self._length += space_needed
 
 
     def save(self, **varvalues):
