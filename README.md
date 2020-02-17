@@ -14,7 +14,7 @@ logL, U = pygmmis.fit(gmm, data) # logL = log-likelihood, U = association of dat
 ```
 However, **pyGMMis** has a few extra tricks up its sleeve.
 
-* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is known as "Extreme Deconvolution" ([code](https://github.com/jobovy/extreme-deconvolution)).
+* It can account for independent multivariate normal measurement errors for each of the observed samples, and then recovers an estimate of the error-free distribution. This technique is known as "Extreme Deconvolution" by Bovy, Hogg & Roweis (2011).
 * It works with missing data (features) by setting the respective elements of the covariance matrix to a vary large value, thus effectively setting the weights of the missing feature to 0.
 * It can deal with gaps (aka "truncated data") and variable sample completeness as long as
   * you know the incompleteness over the entire feature space,
@@ -26,7 +26,7 @@ If you want more context and details on those capabilities, have a look at this 
 
 Under the hood, **pyGMMis** uses the Expectation-Maximization procedure. When dealing with sample incompleteness it generates its best guess of the unobserved samples on the fly given the current model fit to the observed samples.
 
-![Example of pyGMMis](tests/pygmmis.png)
+![Example of pyGMMis](https://raw.githubusercontent.com/pmelchior/pygmmis/master/tests/pygmmis.png)
 
 In the example above, the true distribution is shown as contours in the left panel. We then draw 400 samples from it (red), add Gaussian noise to them (1,2,3 sigma contours shown in blue), and select only samples within the box but outside of the circle (blue).
 
@@ -148,7 +148,7 @@ Dependencies:
    w = 0.1    # minimum covariance regularization, same units as data
    cutoff = 5 # segment the data set into neighborhood within 5 sigma around components
    tol = 1e-3 # tolerance on logL to terminate EM
-   
+
    # define RNG for deterministic behavior
    from numpy.random import RandomState
    seed = 42
@@ -182,4 +182,4 @@ Dependencies:
 
 
 
-For a complete example, have a look at [the test script](tests/test.py). For requests and bug reports, please open an issue.
+For a complete example, have a look at [the test script](https://github.com/pmelchior/pygmmis/blob/master/tests/test.py). For requests and bug reports, please open an issue.
