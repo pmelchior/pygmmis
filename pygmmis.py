@@ -150,7 +150,7 @@ def logsum(logX, axis=0):
     # adjust the shape of c for addition with logX
     c_shape = [slice(None) for i in xrange(len(logX.shape))]
     c_shape[axis] = None
-    return np.log(np.exp(logX + c[c_shape]).sum(axis=axis)) - c
+    return np.log(np.exp(logX + c[tuple(c_shape)]).sum(axis=axis)) - c
 
 
 def chi2_cutoff(D, cutoff=3.):
