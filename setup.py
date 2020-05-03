@@ -4,7 +4,7 @@ long_description = open('README.md').read()
 
 setup(
     name="pygmmis",
-    version='1.1.2',
+    version='1.1.3',
     description="Gaussian mixture model for incomplete, truncated, and noisy data",
     long_description = long_description,
     long_description_content_type='text/markdown',
@@ -22,5 +22,5 @@ setup(
         "Programming Language :: Python",
         "Topic :: Scientific/Engineering :: Information Analysis"
     ],
-    requires=["numpy","scipy","multiprocessing","parmap"]
+    install_requires=["numpy","scipy","multiprocessing","parmap"]
 )
