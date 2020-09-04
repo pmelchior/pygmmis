@@ -1,10 +1,14 @@
 from __future__ import division
 import numpy as np
-import scipy.special
+import scipy.special, scipy.stats
 import ctypes
 
 import logging
 logger = logging.getLogger("pygmmis")
+
+# set up multiprocessing
+import multiprocessing
+import parmap
 
 def createShared(a, dtype=ctypes.c_double):
     """Create a shared array to be used for multiprocessing's processes.
@@ -19,7 +23,6 @@ def createShared(a, dtype=ctypes.c_double):
     Returns:
         numpy array whose container is a multiprocessing.Array
     """
-    import multiprocessing
     shared_array_base = multiprocessing.Array(dtype, a.size)
     shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
     shared_array[:] = a.flatten()
@@ -167,7 +170,6 @@ def chi2_cutoff(D, cutoff=3.):
     Returns:
         float: upper limit for chi-squared in D dimensions
     """
-    import scipy.stats
     cdf_1d = scipy.stats.norm.cdf(cutoff)
     confidence_1d = 1-(1-cdf_1d)*2
     cutoff_nd = scipy.stats.chi2.ppf(confidence_1d, D)
@@ -279,7 +281,6 @@ class GMM(object):
 
     def _mp_chunksize(self):
         # find how many components to distribute over available threads
-        import multiprocessing
         cpu_count = multiprocessing.cpu_count()
         chunksize = max(1, self.K//cpu_count)
         n_chunks = min(cpu_count, self.K//chunksize)
@@ -319,7 +320,6 @@ class GMM(object):
         """
         # Instead log p (x | k) for each k (which is huge)
         # compute it in stages: first for each chunk, then sum over all chunks
-        import multiprocessing
         pool = multiprocessing.Pool()
         chunks = self._get_chunks()
         results = [pool.apply_async(self._logsum_chunk, (chunk, coords, covar)) for chunk in chunks]
@@ -327,6 +327,7 @@ class GMM(object):
         for r in results:
             log_p_y_chunk.append(r.get())
         pool.close()
+        pool.join()
         return logsum(np.array(log_p_y_chunk)) # sum over all chunks = all k
 
     def _logsum_chunk(self, chunk, coords, covar=None):
@@ -453,9 +454,8 @@ def initFromDataMinMax(gmm, data, covar=None, s=None, k=None, rng=np.random):
     # K spheres of radius s [having volume s^D * pi^D/2 / gamma(D/2+1)]
     # should completely fill the volume spanned by data.
     if s is None:
-        from scipy.special import gamma
         vol_data = np.prod(max_pos-min_pos)
-        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
+        s = (vol_data / gmm.K * scipy.special.gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
         logger.info("initializing spheres with s=%.2f in data domain" % s)
 
     gmm.covar[k,:,:] = s**2 * np.eye(data.shape[1])
@@ -494,11 +494,10 @@ def initFromDataAtRandom(gmm, data, covar=None, s=None, k=None, rng=np.random):
     refs = rng.randint(0, len(data), size=k_len)
     D = data.shape[1]
     if s is None:
-        from scipy.special import gamma
         min_pos = data.min(axis=0)
         max_pos = data.max(axis=0)
         vol_data = np.prod(max_pos-min_pos)
-        s = (vol_data / gmm.K * gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
+        s = (vol_data / gmm.K * scipy.special.gamma(gmm.D*0.5 + 1))**(1/gmm.D) / np.sqrt(np.pi)
         logger.info("initializing spheres with s=%.2f near data points" % s)
 
     gmm.mean[k,:] = data[refs] + rng.multivariate_normal(np.zeros(D), s**2 * np.eye(D), size=k_len)
@@ -532,7 +531,7 @@ def initFromKMeans(gmm, data, covar=None, rng=np.random):
         gmm.covar[k,:,:] = (d_m[:, :, None] * d_m[:, None, :]).sum(axis=0) / len(data)
 
 
-def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, tol=1e-3, maxiter=None, frozen=None, split_n_merge=False, rng=np.random):
+def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, tol=1e-3, miniter=1, maxiter=1000, frozen=None, split_n_merge=False, rng=np.random):
     """Fit GMM to data.
 
     If given, init_callback is called to set up the GMM components. Then, the
@@ -619,7 +618,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         raise NotImplementedError("covar is set, but covar_callback is None: imputation samples inconsistent")
 
     # set up pool
-    import multiprocessing
     pool = multiprocessing.Pool()
     n_chunks, chunksize = gmm._mp_chunksize()
 
@@ -664,7 +662,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
 
     try:
-        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, maxiter=maxiter, tol=tol, rng=rng)
+        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, miniter=miniter, maxiter=maxiter, tol=tol, rng=rng)
     except Exception:
         # cleanup
         pool.close()
@@ -731,7 +729,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     return log_L, U
 
 # run EM sequence
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, maxiter=None, tol=1e-3, prefix="", changeable=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, miniter=1, maxiter=1000, tol=1e-3, prefix="", changeable=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -742,10 +740,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         cutoff_nd = chi2_cutoff(gmm.D, cutoff=cutoff)
 
         # store chi2 cutoff for component shifts, use 0.5 sigma
-        shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.25, cutoff/2))
+        shift_cutoff = chi2_cutoff(gmm.D, cutoff=min(0.1, cutoff/2))
     else:
         cutoff_nd = None
-        shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.25)
+        shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.1)
 
     it = 0
     header = "ITER\tSAMPLES"
@@ -766,36 +764,32 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     if background is not None:
         bg_amp_ = background.amp
 
-    while maxiter is None or it < maxiter: # limit loop in case of slow convergence
-        log_L_, N, N2, N0 = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+    while it < maxiter: # limit loop in case of slow convergence
+        log_L_, N, N2_, N0_ = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
         moved = np.flatnonzero(shift2 > shift_cutoff)
         status_mess = "%s%d\t%d" % (prefix, it, N)
         if sel_callback is not None:
-            status_mess += "\t%d\t%d" % (N2, N0)
+            status_mess += "\t%.2f\t%.2f" % (N2_, N0_)
         if background is not None:
             status_mess += "\t%.3f" % bg_amp_
         status_mess += "\t%.3f\t%d" % (log_L_, gmm.K - moved.size)
         logger.info(status_mess)
 
-        # convergence tests:
-        if it > 0 and log_L_ < log_L + tol:
-            # with imputation or background fitting, observed logL can decrease
-            # allow some slack, but revert to previous model if it gets worse
-            if log_L_ < log_L - tol:
-                gmm.amp[:] = gmm_.amp[:]
-                gmm.mean[:,:] = gmm_.mean[:,:]
-                gmm.covar[:,:,:] = gmm_.covar[:,:,:]
-                if background is not None:
-                    background.amp = bg_amp_
-                logger.info("likelihood decreased: reverting to previous model")
-                break
-            elif moved.size == 0:
-                log_L = log_L_
-                logger.info("likelihood converged within tolerance %r: stopping here." % tol)
-                break
+        # convergence tests
+        if it > miniter:
+            if sel_callback is None:
+                if np.abs(log_L_ - log_L) < tol * np.abs(log_L) and moved.size == 0:
+                    log_L = log_L_
+                    logger.info("likelihood converged within relative tolerance %r: stopping here." % tol)
+                    break
+            else:
+                if np.abs(N0_ - N0) < tol * N0 and np.abs(N2_ - N2) < tol * N2 and moved.size == 0:
+                    log_L = log_L_
+                    logger.info("imputation sample size converged within relative tolerance %r: stopping here." % tol)
+                    break
 
         # force update to U for all moved components
         if cutoff is not None:
@@ -807,6 +801,9 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
 
         # update all important _ quantities for convergence test(s)
         log_L = log_L_
+        N0 = N0_
+        N2 = N2_
+
         # backup to see if components move or if next step gets worse
         # note: not gmm = gmm_ !
         gmm_.amp[:] = gmm.amp[:]
@@ -844,8 +841,9 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
         data2, covar2, N0 = draw(gmm, len(data)*oversampling, sel_callback=sel_callback, orig_size=N0*oversampling, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
+        #data2 = createShared(data2)
+        N0 = N0/oversampling
         U2 = [None for k in xrange(gmm.K)]
-        N0 = int(N0/oversampling)
 
         if len(data2) > 0:
             log_S2 = np.zeros(len(data2))
@@ -873,6 +871,14 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
             if sel_outside.any():
                 logger.debug("component inside fractions: " + ("(" + "%.2f," * gmm.K + ")") % tuple(A/(A+A2)))
 
+        # correct the observed likelihood for the overall normalization constant of
+        # of the data process with selection:
+        # logL(x | gmm) = sum_k p_k(x) / Z(gmm), with Z(gmm) = int dx sum_k p_k(x) = 1
+        # becomes
+        # logL(x | gmm) = sum_k Omega(x) p_k(x) / Z'(gmm),
+        # with Z'(gmm) = int dx Omega(x) sum_k p_k(x) =~ N / N0 ~= N/(N + N2) by MC integration
+        log_L -= N * np.log(N/(N+N2))
+
     _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
 
     return log_L, N, N2, N0
@@ -883,7 +889,6 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
     # also N = {i | i in neighborhood[k]} for any k
-    import parmap
     log_S[:] = 0
     H[:] = 0
     k = 0
@@ -912,11 +917,11 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
                 error *= np.real(scipy.special.erf((data[:,d] - x0[d])/denom)  - scipy.special.erf((data[:,d] - x1[d])/denom)) / 2
             p_bg[0] *= error
         log_S[:] = np.log(log_S + p_bg[0])
-        log_L = log_S.mean()
+        log_L = log_S.sum()
     else:
         # need log(S), but since log(0) isn't a good idea, need to restrict to H
         log_S[H] = np.log(log_S[H])
-        log_L = log_S[H].mean()
+        log_L = log_S[H].sum()
 
     return log_L
 
@@ -987,7 +992,6 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, R=None, p_bg=None, 
     # perform sums for M step in the pool
     # NOTE: in a partial run, could work on changeable components only;
     # however, there seem to be side effects or race conditions
-    import parmap
     k = 0
     for A[k], M[k,:], C[k,:,:] in \
     parmap.starmap(_Msums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, R, log_S, pool=pool, chunksize=chunksize):
@@ -1098,11 +1102,11 @@ def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, b
 def _drawGMM_BG(gmm, size, covar_callback=None, background=None, rng=np.random):
     # draw sample from model, or from background+model
     if background is None:
-        data2 = gmm.draw(size, rng=rng)
+        data2 = gmm.draw(int(np.round(size)), rng=rng)
     else:
         # model is GMM + Background
         bg_size = int(background.amp * size)
-        data2 = np.concatenate((gmm.draw(size-bg_size, rng=rng), background.draw(bg_size, rng=rng)))
+        data2 = np.concatenate((gmm.draw(int(np.round(size-bg_size)), rng=rng), background.draw(int(np.round(bg_size)), rng=rng)))
 
     # add noise
     # NOTE: When background is set, adding noise is problematic if
@@ -1177,10 +1181,9 @@ def draw(gmm, obs_size, sel_callback=None, invert_sel=False, orig_size=None, cov
 
         # check if predicted observed size is consistent with observed data
         # 68% confidence interval for Poisson variate: observed size
-        from scipy.stats import chi2
         alpha = 0.32
-        lower = 0.5*chi2.ppf(alpha/2, 2*obs_size)
-        upper = 0.5*chi2.ppf(1 - alpha/2, 2*obs_size + 2)
+        lower = 0.5*scipy.stats.chi2.ppf(alpha/2, 2*obs_size)
+        upper = 0.5*scipy.stats.chi2.ppf(1 - alpha/2, 2*obs_size + 2)
         obs_size_ = sel2.sum()
         while obs_size_ > upper or obs_size_ < lower:
             orig_size = int(orig_size / obs_size_ * obs_size)
@@ -1231,7 +1234,6 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     # ask for the three worst components to avoid split being in merge_jk
     """
     JS = np.empty(gmm.K)
-    import parmap
     k = 0
     A = gmm.amp * N
     for JS[k] in \

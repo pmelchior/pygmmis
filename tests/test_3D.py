@@ -1,5 +1,6 @@
 import pygmmis
 import numpy as np
+import logging
 from functools import partial
 
 L = 1
@@ -106,7 +107,7 @@ def GMMSel(coords, gmm, covar=None, sel_gmm=None, cutoff_nd=3., rng=np.random):
     # if within 1 sigma of any component: you're out!
     import multiprocessing, parmap
     n_chunks, chunksize = sel_gmm._mp_chunksize()
-    inside = np.array(parmap.map(insideComponent, range(sel_gmm.K), sel_gmm, coords, covar, cutoff_nd, chunksize=chunksize))
+    inside = np.array(parmap.map(insideComponent, range(sel_gmm.K), sel_gmm, coords, covar, cutoff_nd, pm_chunksize=chunksize))
     return np.max(inside, axis=0)
 
 def max_posterior(gmm, U, coords, covar=None):
@@ -118,7 +119,7 @@ def max_posterior(gmm, U, coords, covar=None):
     H = np.zeros(len(coords), dtype="bool")
     k = 0
     for log_p[k], U[k], _ in \
-    parmap.starmap(pygmmis._Estep, zip(range(gmm.K), U), gmm, data, covar, None, pool=pool, chunksize=chunksize):
+    parmap.starmap(pygmmis._Estep, zip(range(gmm.K), U), gmm, data, covar, None, pool=pool, pm_chunksize=chunksize):
         log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
         H[U[k]] = 1
         k += 1
@@ -308,7 +309,7 @@ if __name__ == "__main__":
         mean_rho_[i] = count__cube[mask].mean()
         std_rho_[i] = count__cube[mask].std() / sqrtN
 
-"""
+    """
     fig = plt.figure()
     ax = fig.add_subplot(111)
     ax.plot(bins, np.zeros_like(bins), ls='--', c='#888888')
@@ -371,4 +372,4 @@ if __name__ == "__main__":
     ax.set_xlim3d(0,1)
     ax.set_ylim3d(0,1)
     ax.set_zlim3d(0,1)
-"""
+    """

@@ -271,16 +271,12 @@ if __name__ == '__main__':
     # We need a good initial location to explore the
     # volume that is spanned by the missing part of the data
     # We therefore run a standard GMM without imputation first
-    # NOTE: You want to choose this carefully, depending
-    # on the missingness mechanism.
     start = datetime.datetime.now()
     rng = RandomState(seed)
     for r in range(T):
         if bg is not None:
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
-        # we want to extend the components to cover the excluded areas
-        gmms[r].covar[:] *= 4
         l[r], _ = pygmmis.fit(gmms[r], data, init_method='none', w=w,  cutoff=cutoff, sel_callback=cb,  oversampling=oversampling, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
@@ -294,7 +290,6 @@ if __name__ == '__main__':
         if bg is not None:
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
-        gmms[r].covar[:] *= 4
         l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_method='none', w=w, cutoff=cutoff, sel_callback=cb, oversampling=oversampling, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
