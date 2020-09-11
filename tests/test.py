@@ -133,21 +133,14 @@ def getHole(coords):
 def getBoxWithHole(coords):
     return getBox(coords)*getHole(coords)
 
-def getHalfDensity(coords, rng=np.random):
-    mask = np.ones(coords.shape[0], dtype='bool')
-    mask[rng.rand(coords.shape[0]) < 0.5] = 0
-    return mask
-
-def getTaperedDensity(coords, rng=np.random):
-    mask = np.ones(coords.shape[0], dtype='bool')
-    mask[rng.rand(coords.shape[0]) < coords[:,0]/8] = 0
-    return mask
-
 def getCut(coords):
     return (coords[:,0] < 6)
 
 def getAll(coords):
-    return np.ones(len(coords), dtype='bool')
+    return np.ones(len(coords))
+
+def getHalf(coords, rng=np.random):
+    return 0.5 * np.ones(len(coords))
 
 def getSelection(type="hole", rng=np.random):
     if type == "hole":
@@ -163,16 +156,7 @@ def getSelection(type="hole", rng=np.random):
     if type == "cut":
         cb = getCut
         ps = lines.Line2D([6, 6],[-5, 15], ls='dotted', lw=1, color='k')
-    if type == "tapered":
-        cb = partial(getTaperedDensity, rng=rng)
-        ps = lines.Line2D([8, 8],[-5, 15], ls='dotted', lw=1, color='k')
-    if type == "under":
-        cb = getUnder
-        ps = None
-    if type == "over":
-        cb = getOver
-        ps = None
-    if type == "none":
+    if type == "all":
         cb = getAll
         ps = None
     return cb, ps
@@ -230,10 +214,10 @@ if __name__ == '__main__':
     noisy = orig_bg + rng.normal(0, scale=disp, size=(len(orig_bg), D))
 
     # get observational selection function
-    cb, ps = getSelection(sel_type, rng=rng)
+    omega, ps = getSelection(sel_type, rng=rng)
 
     # apply selection
-    sel = cb(noisy)
+    sel = rng.rand(N) < omega(noisy)
     data = noisy[sel]
     # single covariance for all samples
     covar = disp**2 * np.eye(D)
@@ -277,7 +261,7 @@ if __name__ == '__main__':
         if bg is not None:
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
-        l[r], _ = pygmmis.fit(gmms[r], data, init_method='none', w=w,  cutoff=cutoff, sel_callback=cb,  oversampling=oversampling, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, init_method='none', w=w,  cutoff=cutoff, sel_callback=omega,  oversampling=oversampling, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$")
@@ -290,7 +274,7 @@ if __name__ == '__main__':
         if bg is not None:
             bg.amp = bg_amp
         pygmmis.fit(gmms[r], data, w=w, cutoff=cutoff, background=bg, rng=rng)
-        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_method='none', w=w, cutoff=cutoff, sel_callback=cb, oversampling=oversampling, covar_callback=covar_cb, background=bg, rng=rng)
+        l[r], _ = pygmmis.fit(gmms[r], data, covar=covar, init_method='none', w=w, cutoff=cutoff, sel_callback=omega, oversampling=oversampling, covar_callback=covar_cb, background=bg, rng=rng)
     avg = pygmmis.stack(gmms, l)
     print ("execution time %ds" % (datetime.datetime.now() - start).seconds)
     plotResults(orig, data, avg, patch=ps, description="$\mathtt{GMMis}$ & noise deconvolution")

@@ -541,7 +541,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
         gmm: an instance if GMM
         data: numpy array (N,D)
         covar: sample noise covariance; numpy array (N,D,D) or (D,D) if i.i.d.
-        R: sample projection matrix (full rank); numpy array (N,D,D)
+        R: sample projection matrix; numpy array (N,D,D)
         init_method (string): one of ['random', 'minmax', 'kmeans', 'none']
             defines the method to initialize the GMM components
         w (float): minimum covariance regularization
@@ -745,6 +745,11 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         cutoff_nd = None
         shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.1)
 
+    if sel_callback is not None:
+        omega = sel_callback(data)
+    else:
+        omega = None
+
     it = 0
     header = "ITER\tSAMPLES"
     if sel_callback is not None:
@@ -765,7 +770,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         bg_amp_ = background.amp
 
     while it < maxiter: # limit loop in case of slow convergence
-        log_L_, N, N2_, N0_ = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+        log_L_, N, N2_, N0_ = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R, sel_callback=sel_callback, omega=omega, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -817,12 +822,12 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     return log_L, N, N2
 
 # run one EM step
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, omega=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
 
     # NOTE: T_inv (in fact (T_ik)^-1 for all samples i and components k)
     # is very large and is unfortunately duplicated in the parallelized _Mstep.
     # If memory is too limited, one can recompute T_inv in _Msums() instead.
-    log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R, background=background, p_bg=p_bg, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
+    log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R, omega=omega, background=background, p_bg=p_bg, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
     A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, R=R, p_bg=p_bg, pool=pool, chunksize=chunksize)
 
     A2 = M2 = C2 = B2 = H2 = N2 = 0
@@ -840,7 +845,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
 
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
-        data2, covar2, N0 = draw(gmm, len(data)*oversampling, sel_callback=sel_callback, orig_size=N0*oversampling, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
+        data2, covar2, N0, omega2 = draw(gmm, len(data)*oversampling, sel_callback=sel_callback, orig_size=N0*oversampling, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
         #data2 = createShared(data2)
         N0 = N0/oversampling
         U2 = [None for k in xrange(gmm.K)]
@@ -856,10 +861,10 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
             else:
                 p_bg2 = None
 
-            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, R=R2,  background=background, p_bg=p_bg2, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
+            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, R=R2, omega=None, background=background, p_bg=p_bg2, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
             A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, R=R2, p_bg=p_bg2, pool=pool, chunksize=chunksize)
 
-            # normalize foer oversampling
+            # normalize for oversampling
             A2 /= oversampling
             M2 /= oversampling
             C2 /= oversampling
@@ -876,8 +881,8 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
         # logL(x | gmm) = sum_k p_k(x) / Z(gmm), with Z(gmm) = int dx sum_k p_k(x) = 1
         # becomes
         # logL(x | gmm) = sum_k Omega(x) p_k(x) / Z'(gmm),
-        # with Z'(gmm) = int dx Omega(x) sum_k p_k(x) =~ N / N0 ~= N/(N + N2) by MC integration
-        log_L -= N * np.log(N/(N+N2))
+        # with Z'(gmm) = int dx Omega(x) sum_k p_k(x), which we can gt by MC integration
+        log_L -= N * np.log((omega.sum() + omega2.sum() / oversampling) / (N + N2))
 
     _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
 
@@ -885,7 +890,7 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
 
 # perform E step calculations.
 # If cutoff is set, this will also set the neighborhoods U
-def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=None, p_bg=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
+def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, omega=None, background=None, p_bg=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
     # also N = {i | i in neighborhood[k]} for any k
@@ -917,10 +922,14 @@ def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, background=
                 error *= np.real(scipy.special.erf((data[:,d] - x0[d])/denom)  - scipy.special.erf((data[:,d] - x1[d])/denom)) / 2
             p_bg[0] *= error
         log_S[:] = np.log(log_S + p_bg[0])
+        if omega is not None:
+            log_S += np.log(omega)
         log_L = log_S.sum()
     else:
         # need log(S), but since log(0) isn't a good idea, need to restrict to H
         log_S[H] = np.log(log_S[H])
+        if omega is not None:
+            log_S += np.log(omega)
         log_L = log_S[H].sum()
 
     return log_L
@@ -1173,31 +1182,34 @@ def draw(gmm, obs_size, sel_callback=None, invert_sel=False, orig_size=None, cov
     # draw from model (with background) and add noise.
     # TODO: may want to decide whether to add noise before selection or after
     # Here we do noise, then selection, but this is not fundamental
-    data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
+    data, covar = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
 
     # apply selection
     if sel_callback is not None:
-        sel2 = sel_callback(data2)
+        omega = sel_callback(data)
+        sel = rng.rand(len(data)) < omega
 
         # check if predicted observed size is consistent with observed data
         # 68% confidence interval for Poisson variate: observed size
         alpha = 0.32
         lower = 0.5*scipy.stats.chi2.ppf(alpha/2, 2*obs_size)
         upper = 0.5*scipy.stats.chi2.ppf(1 - alpha/2, 2*obs_size + 2)
-        obs_size_ = sel2.sum()
+        obs_size_ = sel.sum()
         while obs_size_ > upper or obs_size_ < lower:
             orig_size = int(orig_size / obs_size_ * obs_size)
-            data2, covar2 = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
-            sel2 = sel_callback(data2)
-            obs_size_ = sel2.sum()
+            data, covar = _drawGMM_BG(gmm, orig_size, covar_callback=covar_callback, background=background, rng=rng)
+            omega = sel_callback(data)
+            sel = rng.rand(len(data)) < omega
+            obs_size_ = sel.sum()
 
         if invert_sel:
-            sel2 = ~sel2
-        data2 = data2[sel2]
-        if covar_callback is not None and covar2.shape != (gmm.D, gmm.D):
-            covar2 = covar2[sel2]
+            sel = ~sel
+        data = data[sel]
+        omega = omega[sel]
+        if covar_callback is not None and covar.shape != (gmm.D, gmm.D):
+            covar = covar[sel]
 
-    return data2, covar2, orig_size
+    return data, covar, orig_size, omega
 
 
 def _JS(k, gmm, log_p, log_S, U, A):
