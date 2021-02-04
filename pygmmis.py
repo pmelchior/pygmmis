@@ -625,9 +625,6 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     # precautions for cases when some points are treated as outliers
     # and not considered as belonging to any component
     log_S = createShared(np.zeros(N))          # S = sum_k p(x|k)
-    # FIXME: create sheared boolean array results in
-    # AttributeError: 'c_bool' object has no attribute '__array_interface__'
-    H = np.zeros(N, dtype='bool')              # H == 1 for points in the fit
     log_p = [[] for k in xrange(gmm.K)]        # P = p(x|k) for x in U[k]
     T_inv = [None for k in xrange(gmm.K)]      # T = covar(x) + gmm.covar[k]
     U = [None for k in xrange(gmm.K)]          # U = {x close to k}
@@ -662,7 +659,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             raise NotImplementedError("frozen should be list of indices or dictionary with keys in ['amp','mean','covar']")
 
     try:
-        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, miniter=miniter, maxiter=maxiter, tol=tol, rng=rng)
+        log_L, N, N2 = _EM(gmm, log_p, U, T_inv, log_S, data_, covar=covar_, R=R, sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, changeable=changeable, miniter=miniter, maxiter=maxiter, tol=tol, rng=rng)
     except Exception:
         # cleanup
         pool.close()
@@ -706,10 +703,10 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
             # Effectively, partial runs are as expensive as full runs.
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = np.in1d(xrange(gmm.K), changing, assume_unique=True)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_P", changeable=changeable, rng=rng)
 
             changeable['amp'] = changeable['mean'] = changeable['covar'] = slice(None)
-            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, H, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
+            log_L_, N_, N2_ = _EM(gmm, log_p, U, T_inv, log_S, data_, covar=covar_, R=R,  sel_callback=sel_callback, oversampling=oversampling, covar_callback=covar_callback, w=w, pool=pool, chunksize=chunksize, cutoff=cutoff, background=background, p_bg=p_bg, maxiter=maxiter, tol=tol, prefix="SNM_F", changeable=changeable, rng=rng)
 
             if log_L >= log_L_:
                 # revert to backup
@@ -729,7 +726,7 @@ def fit(gmm, data, covar=None, R=None, init_method='random', w=0., cutoff=None, 
     return log_L, U
 
 # run EM sequence
-def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, miniter=1, maxiter=1000, tol=1e-3, prefix="", changeable=None, rng=np.random):
+def _EM(gmm, log_p, U, T_inv, log_S, data, covar=None, R=None, sel_callback=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, miniter=1, maxiter=1000, tol=1e-3, prefix="", changeable=None, rng=np.random):
 
     # compute effective cutoff for chi2 in D dimensions
     if cutoff is not None:
@@ -746,7 +743,10 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         shift_cutoff = chi2_cutoff(gmm.D, cutoff=0.1)
 
     if sel_callback is not None:
-        omega = sel_callback(data)
+        omega = createShared(sel_callback(data).astype("float"))
+        if np.any(omega == 0):
+            logger.warning("Selection probability Omega = 0 for an observed sample.")
+            logger.warning("Selection callback likely incorrect! Bad things will happen!")
     else:
         omega = None
 
@@ -770,7 +770,7 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
         bg_amp_ = background.amp
 
     while it < maxiter: # limit loop in case of slow convergence
-        log_L_, N, N2_, N0_ = _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=covar, R=R, sel_callback=sel_callback, omega=omega, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
+        log_L_, N, N2_, N0_ = _EMstep(gmm, log_p, U, T_inv, log_S, N0, data, covar=covar, R=R, sel_callback=sel_callback, omega=omega, oversampling=oversampling, covar_callback=covar_callback, background=background, p_bg=p_bg , w=w, pool=pool, chunksize=chunksize, cutoff=cutoff_nd, tol=tol, changeable=changeable, it=it, rng=rng)
 
         # check if component has moved by more than sigma/2
         shift2 = np.einsum('...i,...ij,...j', gmm.mean - gmm_.mean, np.linalg.inv(gmm_.covar), gmm.mean - gmm_.mean)
@@ -822,15 +822,15 @@ def _EM(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, sel_callback=N
     return log_L, N, N2
 
 # run one EM step
-def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_callback=None, omega=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
+def _EMstep(gmm, log_p, U, T_inv, log_S, N0, data, covar=None, R=None, sel_callback=None, omega=None, oversampling=10, covar_callback=None, background=None, p_bg=None, w=0, pool=None, chunksize=1, cutoff=None, tol=1e-3, changeable=None, it=0, rng=np.random):
 
     # NOTE: T_inv (in fact (T_ik)^-1 for all samples i and components k)
     # is very large and is unfortunately duplicated in the parallelized _Mstep.
     # If memory is too limited, one can recompute T_inv in _Msums() instead.
-    log_L = _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=covar, R=R, omega=omega, background=background, p_bg=p_bg, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
-    A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=covar, R=R, p_bg=p_bg, pool=pool, chunksize=chunksize)
+    log_L = _Estep(gmm, log_p, U, T_inv, log_S, data, covar=covar, R=R, omega=omega, background=background, p_bg=p_bg, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
+    A,M,C,N,B = _Mstep(gmm, U, log_p, T_inv, log_S, data, covar=covar, R=R, p_bg=p_bg, pool=pool, chunksize=chunksize)
 
-    A2 = M2 = C2 = B2 = H2 = N2 = 0
+    A2 = M2 = C2 = B2 = N2 = 0
 
     # here the magic happens: imputation from the current model
     if sel_callback is not None:
@@ -861,8 +861,8 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
             else:
                 p_bg2 = None
 
-            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, H2, data2, covar=covar2, R=R2, omega=None, background=background, p_bg=p_bg2, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
-            A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, H2, data2, covar=covar2, R=R2, p_bg=p_bg2, pool=pool, chunksize=chunksize)
+            log_L2 = _Estep(gmm, log_p2, U2, T2_inv, log_S2, data2, covar=covar2, R=R2, omega=None, background=background, p_bg=p_bg2, pool=pool, chunksize=chunksize, cutoff=cutoff, it=it)
+            A2,M2,C2,N2,B2 = _Mstep(gmm, U2, log_p2, T2_inv, log_S2, data2, covar=covar2, R=R2, p_bg=p_bg2, pool=pool, chunksize=chunksize)
 
             # normalize for oversampling
             A2 /= oversampling
@@ -884,18 +884,21 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, H, N0, data, covar=None, R=None, sel_ca
         # with Z'(gmm) = int dx Omega(x) sum_k p_k(x), which we can gt by MC integration
         log_L -= N * np.log((omega.sum() + omega2.sum() / oversampling) / (N + N2))
 
-    _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=changeable, background=background)
+    _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, changeable=changeable, background=background)
 
     return log_L, N, N2, N0
 
 # perform E step calculations.
 # If cutoff is set, this will also set the neighborhoods U
-def _Estep(gmm, log_p, U, T_inv, log_S, H, data, covar=None, R=None, omega=None, background=None, p_bg=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
+def _Estep(gmm, log_p, U, T_inv, log_S, data, covar=None, R=None, omega=None, background=None, p_bg=None, pool=None, chunksize=1, cutoff=None, it=0, rng=np.random):
     # compute p(i | k) for each k independently in the pool
     # need S = sum_k p(i | k) for further calculation
-    # also N = {i | i in neighborhood[k]} for any k
     log_S[:] = 0
-    H[:] = 0
+
+    # H = {i | i in neighborhood[k]} for any k, needed for outliers below
+    # TODO: Use only when cutoff is set
+    H = np.zeros(len(data), dtype="bool")
+
     k = 0
     for log_p[k], U[k], T_inv[k] in \
     parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, cutoff, pool=pool, chunksize=chunksize):
@@ -990,7 +993,7 @@ def _Esum(k, U_k, gmm, data, covar=None, R=None, cutoff=None):
     return np.log(gmm.amp[k]) - log2piD2 - sign*logdet/2 - chi2/2, U_k, T_inv_k
 
 # get zeroth, first, second moments of the data weighted with p_k(x) avgd over x
-def _Mstep(gmm, U, log_p, T_inv, log_S, H, data, covar=None, R=None, p_bg=None, pool=None, chunksize=1):
+def _Mstep(gmm, U, log_p, T_inv, log_S, data, covar=None, R=None, p_bg=None, pool=None, chunksize=1):
 
     # save the M sums from observed data
     A = np.empty(gmm.K)                 # sum for amplitudes
@@ -1073,7 +1076,7 @@ def _Msums(k, U_k, log_p_k, T_inv_k, gmm, data, R, log_S):
 
 # update component with the moment matrices.
 # If changeable is set, update only those components and renormalize the amplitudes
-def _update(gmm, A, M, C, N, B, H, A2, M2, C2, N2, B2, H2, w, changeable=None, background=None):
+def _update(gmm, A, M, C, N, B, A2, M2, C2, N2, B2, w, changeable=None, background=None):
 
     # recompute background amplitude
     if background is not None and background.adjust_amp:
