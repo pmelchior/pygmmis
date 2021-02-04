@@ -4,7 +4,7 @@ long_description = open('README.md').read()
 
 setup(
     name="pygmmis",
-    version='1.2',
+    version='1.2.1',
     description="Gaussian mixture model for incomplete, truncated, and noisy data",
     long_description = long_description,
     long_description_content_type='text/markdown',

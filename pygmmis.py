@@ -846,13 +846,15 @@ def _EMstep(gmm, log_p, U, T_inv, log_S, N0, data, covar=None, R=None, sel_callb
         # create fake data with same mechanism as the original data,
         # but invert selection to get the missing part
         data2, covar2, N0, omega2 = draw(gmm, len(data)*oversampling, sel_callback=sel_callback, orig_size=N0*oversampling, invert_sel=True, covar_callback=covar_callback, background=background, rng=rng)
-        #data2 = createShared(data2)
+        data2 = createShared(data2)
+        if not(covar2 is None or covar2.shape == (gmm.D, gmm.D)):
+            covar2 = createShared(covar2)
+
         N0 = N0/oversampling
         U2 = [None for k in xrange(gmm.K)]
 
         if len(data2) > 0:
             log_S2 = np.zeros(len(data2))
-            H2 = np.zeros(len(data2), dtype='bool')
             log_p2 = [[] for k in xrange(gmm.K)]
             T2_inv = [None for k in xrange(gmm.K)]
             R2 = None
