@@ -22,5 +22,5 @@ setup(
         "Programming Language :: Python",
         "Topic :: Scientific/Engineering :: Information Analysis"
     ],
-    install_requires=["numpy","scipy","parmap"]
+    install_requires=["numpy","scipy","parmap>=1.5.2"]
 )

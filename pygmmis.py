@@ -903,7 +903,7 @@ def _Estep(gmm, log_p, U, T_inv, log_S, data, covar=None, R=None, omega=None, ba
 
     k = 0
     for log_p[k], U[k], T_inv[k] in \
-    parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, cutoff, pool=pool, chunksize=chunksize):
+    parmap.starmap(_Esum, zip(xrange(gmm.K), U), gmm, data, covar, R, cutoff, pm_pool=pool, pm_chunksize=chunksize):
         log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
         H[U[k]] = 1
         k += 1
@@ -1008,7 +1008,7 @@ def _Mstep(gmm, U, log_p, T_inv, log_S, data, covar=None, R=None, p_bg=None, poo
     # however, there seem to be side effects or race conditions
     k = 0
     for A[k], M[k,:], C[k,:,:] in \
-    parmap.starmap(_Msums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, R, log_S, pool=pool, chunksize=chunksize):
+    parmap.starmap(_Msums, zip(xrange(gmm.K), U, log_p, T_inv), gmm, data, R, log_S, pm_pool=pool, pm_chunksize=chunksize):
         k += 1
 
     if p_bg is not None:
@@ -1254,7 +1254,7 @@ def _findSNMComponents(gmm, U, log_p, log_S, N, pool=None, chunksize=1):
     k = 0
     A = gmm.amp * N
     for JS[k] in \
-    parmap.map(_JS, xrange(gmm.K), gmm, log_p, log_S, U, A, pool=pool, chunksize=chunksize):
+    parmap.map(_JS, xrange(gmm.K), gmm, log_p, log_S, U, A, pm_pool=pool, pm_chunksize=chunksize):
         k += 1
     """
     # get largest Eigenvalue, weighed by amplitude
