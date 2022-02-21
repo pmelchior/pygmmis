@@ -238,6 +238,22 @@ class GMM(object):
         self.covar = F["covar"]
         F.close()
 
+    @staticmethod
+    def from_file(filename):
+        """Load GMM from file.
+
+        Additional arguments stored by save() will be ignored.
+
+        Args:
+            filename (str): name for file create with save().
+
+        Returns:
+            GMM
+        """
+        gmm = GMM()
+        gmm.load(filename)
+        return gmm
+
     def draw(self, size=1, rng=np.random):
         """Draw samples from the GMM.
 
