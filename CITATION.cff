@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Melchior"
+  given-names: "Peter"
+  orcid: "https://orcid.org/0000-0002-8873-5065"
+title: "pyGMMis"
+url: "https://github.com/pmelchior/pygmmis"
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Melchior"
+    given-names: "Peter"
+    orcid: "https://orcid.org/0000-0002-8873-5065"
+  - family-names: "Goulding"
+    given-names: "Andy"
+    orcid: "https://orcid.org/0000-0003-4700-663X"
+  doi: "10.1016/j.ascom.2018.09.013"
+  journal: "Astronomy and Computing"
+  start: 183 # First page number
+  end: 194 # Last page number
+  title: "Filling the gaps: Gaussian mixture models from noisy, truncated or incomplete samples"
+  volume: 25
+  year: 2018
+  month: 10
