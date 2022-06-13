@@ -32,24 +32,7 @@ In the example above, the true distribution is shown as contours in the left pan
 
 The code is written in pure python (developed and tested in 2.7), parallelized with `multiprocessing`, and is capable of performing density estimation with millions of samples and thousands of model components on machines with sufficient memory.
 
-More details are in the paper listed below. Please cite it if you make use of this code:
-
-```
-@ARTICLE{pygmmis,
-   author = {{Melchior}, P. and {Goulding}, A.~D.},
-    title = "{Filling the gaps: Gaussian mixture models from noisy, truncated or incomplete samples}",
-  journal = {Astronomy and Computing},
-   volume = "25",
-    pages = {183 - 194},
-     year = "2018",
-    month = oct,
-      doi = {10.1016/j.ascom.2018.09.013},
-      url = {https://www.sciencedirect.com/science/article/pii/S2213133718300489},
-archivePrefix = "arXiv",
-   eprint = {1611.05806},
- primaryClass = "astro-ph.IM"
-}
-```
+More details are in the paper listed in the file `CITATION.cff`.
 
 
 
