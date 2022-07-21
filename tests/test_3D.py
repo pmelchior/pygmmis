@@ -119,7 +119,7 @@ def max_posterior(gmm, U, coords, covar=None):
     H = np.zeros(len(coords), dtype="bool")
     k = 0
     for log_p[k], U[k], _ in \
-    parmap.starmap(pygmmis._Estep, zip(range(gmm.K), U), gmm, data, covar, None, pool=pool, pm_chunksize=chunksize):
+    parmap.starmap(pygmmis._Estep, zip(range(gmm.K), U), gmm, data, covar, None, pm_pool=pool, pm_chunksize=chunksize):
         log_S[U[k]] += np.exp(log_p[k]) # actually S, not logS
         H[U[k]] = 1
         k += 1
